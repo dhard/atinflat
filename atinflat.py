@@ -593,17 +593,20 @@ if __name__ == '__main__':
             fitb[fk]      =  fb
             fb2           =  f2**beta
             fitb2[fk]     =  fb2
-            mmatrix(fk,m)  # mm[fk]   =  m
+            if cache:
+                mmatrix(fk,m)  # mm[fk]   =  m
+            else:
+                mmd[fk] = m
             
-            sfb               +=  (fb * d)
-            sffb              += ((fb * f) * d)
-            if f > maxf:
-                maxf = f
+        sfb               +=  (fb * d)
+        sffb              += ((fb * f) * d)
+        if f > maxf:
+            maxf = f
                 
-            sfb2              +=  (fb2 * d)
-            sffb2             += ((fb2 * f2) * d)
-            if f2 > maxf2:
-                maxf2 = f2
+        sfb2              +=  (fb2 * d)
+        sffb2             += ((fb2 * f2) * d)
+        if f2 > maxf2:
+            maxf2 = f2
 
     avgf         = sffb / sfb
     load         = (maxf - avgf)/maxf
