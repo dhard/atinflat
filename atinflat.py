@@ -617,10 +617,12 @@ if __name__ == '__main__':
     for f,dd in sorted(dd.items(),key=operator.itemgetter(0)):
         m        = mmatrix(f)
         mstring  = printline(m)
-        c        = compute_coding_matrix(m,kdmax,epsilon,square=True)
-        accuracy = get_accuracy(c)
+        c        = compute_coding_matrix(m,kdmax,epsilon,square=False)
+        acc      = get_accuracy(c)
+        c2       = compute_coding_matrix(m,kdmax,epsilon,square=True)
+        acc2     = get_accuracy(c2)
         cstring  = printline(np.round(c,3))
-        print ('degen: {:>10} | off: {:<5.3e} | acc: {:<8.6e} | {:<11.9e} < fitness < {:<11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code:{:<}'.format(dd,oo[f],accuracy,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,cstring))
+        print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {:<11.9e} < fitness < {:<11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(proofread):{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,cstring))
         
     print("# Run time (minutes): ",round((time.time()-starttime)/60,3))
                     
