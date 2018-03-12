@@ -6,24 +6,17 @@ from optparse import OptionParser, OptionValueError
 from scipy import stats
 from bitstring import Bits
 from math import log
+from decimal import *
 import itertools
 from itertools import repeat, chain, combinations, product, combinations_with_replacement
 from sympy import multinomial_coefficients
 from functools import reduce
-import multiprocessing
-import time, sys, re, os
-import numpy as np
 from collections import Counter
-
-import joblib
-from tempfile import mkdtemp
-cachedir = mkdtemp()
-from joblib import Memory, Parallel, delayed
-memory = Memory(cachedir=cachedir, mmap_mode='r', verbose=0)
-
+import multiprocessing
+import time, sys, re, os, operator
+import numpy as np
 import pdb
-import operator
-
+import joblib
 
 def printline(m):
     return re.sub('  ',' ',re.sub('\n',',',np.array2string(m)))
@@ -36,15 +29,59 @@ def powerset(iterable):
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
 
-degeneracy = dict()
-matrix     = dict()  # this could be set to a disk-cache when pairs exceeds 4
-#offt       = dict() # mask bits could be tracked separately for tRNA and aaRS layers
-#offa       = dict()
-off        = dict()
+def masked_genotypes_gen(tRNAs,aaRSs):
+    for sm in powerset(range(tRNAs)):
+        setm = set(sm)
+        if bool(setm):
+            for sn in powerset(range(aaRSs)):
+                setn = set(sn)
+                if bool(setn):
+                    for st in powerset(range(tRNAs)):
+                        sett     = set(st)
+                        if bool(sett & setm):
+                            for sa in powerset(range(aaRSs)):
+                                seta     = set(sa)
+                                if bool(seta & setn):
+                                    yield setm,setn,sett,seta
 
-# this needs to be rewritten to take advantage of pool.imap().
-# the iterator part can be abstracted from the logic
-def compute_degeneracy(tRNAs,aaRSs,mask):
+def genotypes_gen(tRNAs,aaRSs):
+    for st in powerset(range(tRNAs)):
+        sett     = set(st)
+        for sa in powerset(range(aaRSs)):
+            seta     = set(sa)
+            yield sett,seta
+
+from tempfile import mkdtemp
+cachedir = mkdtemp()
+from joblib import Memory
+memory = Memory(cachedir=cachedir, mmap_mode='r', verbose=0)
+
+sbmmd     = dict() # site-block match matrix dictionary keyed by joblib hashes 
+@memory.cache
+def sbm_matrix(k,m=None):
+    if k in sbmmd:
+        return sbmmd[k]
+    elif m is not None:
+        sbmmd[k] = m
+        return m
+    else:
+        return None
+
+mmd     = dict() # match matrix dictionary keyed by fitness 
+@memory.cache
+def mmatrix(k,m=None):
+    if k in mmd:
+        return mmd[k]
+    elif m is not None:
+        mmd[k] = m
+        return m
+    else:
+        return None
+
+degeneracy = dict()
+off        = dict()
+# this could be rewritten to take advantage of pool.imap().
+def compute_degeneracy(tRNAs,aaRSs,mask,cache):
     """
     This function computes all possible site-block-match-matrices
     and their encodable genetic degeneracies
@@ -57,65 +94,67 @@ def compute_degeneracy(tRNAs,aaRSs,mask):
         zeros   = 2**(tRNAs+aaRSs)
 
     if mask:
-        for sm in powerset(range(tRNAs)):
-            setm = set(sm)
+        genotypes = masked_genotypes_gen(tRNAs,aaRSs)
+        for setm,setn,sett,seta in genotypes:
             offm = uni_t - setm
-            if bool(setm):
-                for sn in powerset(range(aaRSs)):
-                    setn = set(sn)
-                    offn = uni_a - setn
-                    if bool(setn):
-                        for st in powerset(range(tRNAs)):
-                            sett     = set(st)
-                            settc    = uni_t - sett
-                            sett     &= setm
-                            settc    &= setm
-                            for sa in powerset(range(aaRSs)):
-                                seta      = set(sa)
-                                setac     = uni_a - seta
-                                seta     &= setn
-                                setac    &= setn
-                                m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
-                                for match in chain(product(sett,seta),product(settc,setac)):
-                                    m[match] += 1
-                                if (m==0).all():
-                                    continue
-                                key = joblib.hash(m)
-                            
-                                if key in degeneracy:
-                                    degeneracy[key] += 1
-                                    zeros -= 1
-                                    off[key] += len(offm | offn)
-                                else:
-                                    degeneracy[key] = 1
-                                    matrix[key]     = m
-                                    off[key] = len(offm | offn)
-                                    zeros -= 1
-    else:
-        for st in powerset(range(tRNAs)):
-            sett     = set(st)
+            offn = uni_a - setn
             settc    = uni_t - sett
-            for sa in powerset(range(aaRSs)):
-                seta      = set(sa)
-                setac     = uni_a - seta
+            sett     &= setm
+            settc    &= setm
+            setac     = uni_a - seta
+            seta     &= setn
+            setac    &= setn
 
-                m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
-                for match in chain(product(sett,seta),product(settc,setac)):
-                    m[match] += 1
-                key = joblib.hash(m)
-
-                if key in degeneracy:
-                    degeneracy[key] += 1
-                    zeros -= 1
+            m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
+            for match in chain(product(sett,seta),product(settc,setac)):
+                m[match] += 1
+            if (m==0).all():
+                print ('# huh! in compute_degeneracy') # why do we get here?
+                continue
+            key = joblib.hash(m)
+            
+            if key in degeneracy:
+                degeneracy[key] += 1
+                zeros -= 1
+                off[key] += len(offm | offn)
+            else:
+                degeneracy[key] = 1
+                if cache:
+                    sbm_matrix(key,m)
                 else:
-                    degeneracy[key] = 1
-                    matrix[key]     = m
-                    zeros -= 1
+                    sbmmd[key] = m
+            off[key] = len(offm | offn)
+            zeros -= 1
+            
+    else:
+        genotypes = genotypes_gen(tRNAs,aaRSs)
+        for sett,seta in genotypes:
+            settc    = uni_t - sett
+            setac     = uni_a - seta        
+            m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
+            for match in chain(product(sett,seta),product(settc,setac)):
+                m[match] += 1
+            key = joblib.hash(m)
+            
+            if key in degeneracy:
+                degeneracy[key] += 1
+                zeros -= 1
+            else:
+                degeneracy[key] = 1
+                if cache:
+                    sbm_matrix(key,m)
+                else:
+                    sbmmd[key] = m
+                zeros -= 1
     if zeros:
         m0  = np.zeros((tRNAs,aaRSs),dtype=np.int16)
         key = joblib.hash(m0)
         degeneracy[key] = zeros
-        matrix[key] = m0
+        off[key]        = 0
+        if cache:
+            sbm_matrix(key,m0) # matrix[key] = mmatrix[key] = m0
+        else:
+            sbmmd[key] = m0
 
 def compute_match_matrix(g,width,pairs,mask):
     length  = 2 * width * (pairs)
@@ -170,7 +209,7 @@ def compute_coding_matrix(m,kdmax,epsilon,square):
     #kd = 1/((1 / kdmax) * np.exp(m * epsilon)) # # K_ij = (kdmax)^-1 * exp [m_ij * epsilon], and k_d = (1/K_ij)
 
     if nsites:
-        np.clip(m,None,nsites,out=m)
+        m = np.clip(m,None,nsites)
     kd = kdmax / np.exp(m * epsilon)
     if square:
         kd = kd**2
@@ -207,7 +246,7 @@ def compute_fitness(args):
     (m,d,o),kdmax,epsilon,coords = args
     
     if nsites:
-        np.clip(m,None,nsites,out=m)
+        m = np.clip(m,None,nsites)
     ## compute energies and kinetic off-rates between tRNAs and aaRSs from the match matrix
     #kd = 1/((1 / kdmax) * np.exp(m * epsilon)) # # K_ij = (kdmax)^-1 * exp [m_ij * epsilon], and k_d = (1/K_ij)
     kd = kdmax / np.exp(m * epsilon) 
@@ -243,46 +282,39 @@ if __name__ == '__main__':
 
     atINFLAT: aaRS-tRNA-Interaction-Network-Fitness-LAndscape-Topographer
 
-    Stationary frequencies and fitnesses over the (T x A) match landscape
-    representing co-evolving interaction-determining features in a feed-forward
-    macromolecular interaction network of T species of tRNA and A species of
-    aminoacyl-tRNA-synthetase (aaRS).
+    Stationary frequencies and fitnesses over a N x N match landscape
+    representing co-evolving interaction-determining features in a
+    feed-forward macromolecular interaction network of N species of
+    tRNA and N species of aminoacyl-tRNA-synthetase (aaRS).
 
-    The network is evolving to express A amino acids in A >= 2 site-types distributed
-    evenly over a unit interval amino-acid/site-type space with one amino-acid site-type
-    at coordinate 0 and one at coordinate 1. To each amino acid corresponds one aaRS that
-    charges it exclusively, without error. 
-
-    If T = A, then to each site-type corresponds a unique codon occuring exclusively and
-    reliably
-
-
-
-    from a potentially perfect message
-    of T different codon symbols
-
-
-    from 
-    
-    Each aaRS perfectly and unambiguously
-    aminoacylates a distinct amino acid that is perfectly suited to one type
-    of site
+    The network is evolving to express N amino acids in N >= 2 message
+    site-types distributed evenly over a unit interval
+    amino-acid/site-type space with one amino-acid site-type at
+    coordinate 0 and one at coordinate 1. To each amino acid
+    corresponds one aaRS that charges it exclusively and without
+    error, and one site-type of equal frequency in which it attains
+    perfect fitness. To each site-type corresponds one distinct
+    species of codon that is read by a distinct species of
+    tRNA. Networks evolve to match corresponding pairs of tRNA and
+    aaRS species so that every codon produces that amino acid which
+    best fits its site-type. The fitness of every amino acid in its
+    matched site-type is the maximal fitness 1, while other amino
+    acids contribute fitness phi^(|coord(a)-coord(b)|) with
+    missense-per-site cost 0 < phi < 1. Fitness is arithmetically
+    averaged within site-types and multiplied over site types.
     
     
-    The complete fitness landscape over all binary sequences of length L
-    is computed where
+    This program computes the complete fitness landscape over all
+    binary genotype sequences of length L = <width> * (2 * <pairs>) =
+    (2wN) representing the interaction-determining genotypes of ,
+    where
 
-        L = <width> * (2 * <pairs>) = (2wP)
-
-    These 2^L genotypes represent every genetic state available within the 
-    interaction channel shared across all (P^2) species of tRNA and aaRSs
-    respectively assuming aaRS-tRNA interactions occur exclusively within
-    "site-blocks," a 
-    over site-blocks, a correspondence
-    
-
-    
-    There are <width> site-blocks, and interaction matching and energy is additive over site-blocks.
+        These 2^L genotypes represent every genetic state available within
+    the interaction channel of length <width> shared across all (N^2)
+    species of tRNA and aaRSs respectively assuming aaRS-tRNA
+    interactions occur exclusively within each of <width>
+    "site-blocks." Interaction matching and energy is additive over
+    site-blocks. 
     
     assuming additivity of interaction energies over sites
     with parametrizable
@@ -303,11 +335,11 @@ if __name__ == '__main__':
     
     parser.add_option("-w","--width",
                       dest="width", type="int", default=2,
-                      help="set interaction interface width/max matches, \n Default: %default")
+                      help="set interaction interface width/max matches, Default: %default")
 
     parser.add_option("-n","--nsites",
                       dest="nsites", type="int", default=None,
-                      help="set minimum number of matches to reach maximum interaction energy.\n Default: <width>")
+                      help="set minimum number of matches to reach maximum interaction energy. Default: <width>")
 
     parser.add_option("-p","--pairs",
                       dest="pairs", type="int", default=2,
@@ -315,7 +347,7 @@ if __name__ == '__main__':
     
     parser.add_option("-m","--mask", action="store_true",
                       dest="mask",
-                      help="use evolveable mask bits as per-site interaction modifiers, \n Default: False")
+                      help="use evolveable mask bits as per-site interaction modifiers, Default: False")
 
     ## parser.add_option("--meso-gen", action="store_true",
     ##                   dest="meso-gen",
@@ -323,27 +355,27 @@ if __name__ == '__main__':
 
     parser.add_option("-B","--beta",
                       dest="beta", type="int", default=100,
-                      help="set beta, a function of the constant population size. See Sella (2009).\n Default: %default")
+                      help="set beta, a function of the constant population size. See Sella (2009). Default: %default")
 
     parser.add_option("--phi",
                       dest="phi", type="float", default=0.99,
-                      help="set phi, the maximum missense fitness-per-site penalty, 0 < phi < 1. See Sella and Ardell (2001).\n Default: %default")
+                      help="set phi, the maximum missense fitness-per-site penalty, 0 < phi < 1. See Sella and Ardell (2001). Default: %default")
     
     parser.add_option("--kdmax",
                       dest="kdmax", type="float", default=10000,
-                      help="set Kdmax in sec^-1, the maximum dissociation rate constant (weakest binding)).\n Default: %default")
+                      help="set Kdmax in sec^-1, the maximum dissociation rate constant (weakest binding)). Default: %default")
     
     parser.add_option("--kdmin",
                       dest="kdmin", type="float", default=220,
-                      help="set Kdmin in sec^-1, the minimum dissociation rate constant (strongest binding)).\n Default: %default")
+                      help="set Kdmin in sec^-1, the minimum dissociation rate constant (strongest binding)). Default: %default")
 
     parser.add_option("--verbose",
                       dest="verbose",  action="store_true",
-                      help="print more output about site blocks etc\n Default: False")
+                      help="print more output about site blocks etc. Default: False")
 
     parser.add_option("-g","--genotypes",
                       dest="genotypes", type="string", default=None,
-                      help="compute match and code matrices and fitness for genotypes in file and exit.\n Default: %default")
+                      help="compute match and code matrices and fitness for binary string genotypes in file and exits. If mask is True, genotype format is t11..t1w.a11..a1w...tP1..tPw.aP1..aPw.m11..m1w.n11..n1w...nP1..nPw, where mij is the maskbit for tij, nij is the maskbit for aij, w is <width> and P is <pairs>. You must set other parameters manually to match your genotype format. Default: %default")
 
     parser.add_option("--chunk",
                       dest="chunk", type="int", default=5,
@@ -353,6 +385,10 @@ if __name__ == '__main__':
                       dest="pool", type="int", default=multiprocessing.cpu_count(),
                       help="set poolsize, number of Pool workers, default is the detected #CPUs\n Default: %default")
 
+    parser.add_option("--cache",
+                      dest="cache", action="store_true",
+                      help="memcache numpy array dictionaries with joblib\n Default: False")
+    
     myargv = sys.argv
     (options, args) = parser.parse_args()
     if len(args) != 0:
@@ -374,6 +410,8 @@ if __name__ == '__main__':
     kdmin       = options.kdmin
     chunksize   = options.chunk
     poolsize    = options.pool
+    cache       = options.cache
+
     verbose     = options.verbose
     genotypes   = options.genotypes
 
@@ -431,6 +469,7 @@ if __name__ == '__main__':
     print('# genotypes :  {}'.format(genotypes))
     print('# pool-size :  {}'.format(poolsize))
     print('# chunk-size:  {}'.format(chunksize))
+    print('# cache     :  {}'.format(cache))
     print('#')
     if genotypes:
         print('#')
@@ -456,8 +495,8 @@ if __name__ == '__main__':
     print('# pre-computing site-block match matrices and degeneracies...')
     print('#')
 
-    compute_degeneracy(tRNAs,aaRSs,mask)
-
+    compute_degeneracy(tRNAs,aaRSs,mask,cache)
+    
     if verbose:
         for key,number in sorted(degeneracy.items(),reverse=True,key=operator.itemgetter(1)):
             print('# degeneracy: {}'.format(number))
@@ -468,7 +507,7 @@ if __name__ == '__main__':
     print('#')
 
     def sb_keys():
-        for key in matrix:
+        for key in sbmmd:
             yield key
 
     def key_tuples():
@@ -478,19 +517,29 @@ if __name__ == '__main__':
 
     def get_match_matrix(tRNAs,aaRSs,key_tuple):
         m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
-        return reduce(lambda x,y:x+matrix[y], key_tuple, m)
+        return reduce(lambda x,y:x+sbmmd[y], key_tuple, m)
+
+    def get_match_matrix_cache(tRNAs,aaRSs,key_tuple):
+        m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
+        return reduce(lambda x,y:x+sbm_matrix(y), key_tuple, m)
 
     def get_degeneracy(key_tuple):
         return reduce(lambda x,y:x*degeneracy[y], key_tuple, 1)
 
+    def get_accuracy(c):
+        return np.round(stats.hmean(np.diagonal(c)),6)
+
     def get_offmask(key_tuple):
-        return reduce(lambda x,y:x+(off[y]/degeneracy[y]), key_tuple, 0)
+        return reduce(lambda x,y:x+(off[y]), key_tuple, 0)
 
-
-    def match_matrices_gen(tRNAs,aaRSs):
+    def match_matrices_gen(tRNAs,aaRSs,cache):
         keyss = key_tuples()
+        if cache:
+            getmm = get_match_matrix_cache
+        else:
+            getmm = get_match_matrix
         for key_tuple in keyss:
-            m  = get_match_matrix(tRNAs,aaRSs,key_tuple)
+            m  = getmm(tRNAs,aaRSs,key_tuple)
             d  = get_degeneracy(key_tuple)
             if mask:
                 o  = get_offmask(key_tuple)
@@ -501,30 +550,31 @@ if __name__ == '__main__':
             k  = tuple(c.values())
             mc = multinomial_coefficients(nu,width)
             d *= mc[k]
+            o /= d
+            o /= width
             yield m,d,o
 
-    match_matrices = match_matrices_gen(tRNAs,aaRSs)
+    match_matrices = match_matrices_gen(tRNAs,aaRSs,cache)
 
     pool = multiprocessing.Pool(processes=poolsize)
     args = zip(match_matrices,repeat(kdmax),repeat(epsilon),repeat((coords)))
 
-    #for arg in args:
-    #    m,d,f,f2    = compute_fitness(arg)
-
-    ## if (meso):
-    ##     for arg in args:
-    ##         print_stochkit2(arg)  
-            
-
-    #    else:
-
     ## this also needs to become a diskcache if pairs > 4 (?)
-    mm = dict()
+    # mm = dict()
 
     dd = dict()
     oo = dict()
     fit = dict()
     fit2 = dict()
+
+    #for arg in args:
+    #    m,d,o,f,f2    = compute_fitness(arg)
+
+    ## if (meso):
+    ##     for arg in args:
+    ##         print_stochkit2(arg)  
+    #    else:
+
     
     for m,d,o,f,f2 in pool.imap(compute_fitness,args,chunksize=chunksize):
         
@@ -543,7 +593,7 @@ if __name__ == '__main__':
             fitb[fk]      =  fb
             fb2           =  f2**beta
             fitb2[fk]     =  fb2
-            mm[fk]        =  m
+            mmatrix(fk,m)  # mm[fk]   =  m
             
             sfb               +=  (fb * d)
             sffb              += ((fb * f) * d)
@@ -563,12 +613,14 @@ if __name__ == '__main__':
     print ('{} < avgf < {}'.format(avgf,avgf2))
     print ('{} > load > {}'.format(load,load2))
     print ('')
-    
+
     for f,dd in sorted(dd.items(),key=operator.itemgetter(0)):
-        mstring = printline(mm[f])
-        c = compute_coding_matrix(mm[f],kdmax,epsilon,square=True)
-        cstring = printline(np.round(c,3))
-        print ('degeneracy: {:>10} | off: {:>5} | {:<12} < fitness < {:<18} | {:<22} < frequency < {:>22} | match:{} | code:{}'.format(dd,(oo[f]/dd),f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,cstring))
+        m        = mmatrix(f)
+        mstring  = printline(m)
+        c        = compute_coding_matrix(m,kdmax,epsilon,square=True)
+        accuracy = get_accuracy(c)
+        cstring  = printline(np.round(c,3))
+        print ('degen: {:>10} | off: {:<5.3e} | acc: {:<8.6e} | {:<#11.9e} < fitness < {:<#11.9e} | {:<#11.9e} < frequency < {:>#11.9e} | match:{} | code:{:<}'.format(dd,oo[f],accuracy,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,cstring))
         
     print("# Run time (minutes): ",round((time.time()-starttime)/60,3))
                     
