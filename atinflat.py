@@ -620,7 +620,7 @@ if __name__ == '__main__':
         c        = compute_coding_matrix(m,kdmax,epsilon,square=True)
         accuracy = get_accuracy(c)
         cstring  = printline(np.round(c,3))
-        print ('degen: {:>10} | off: {:<5.3e} | acc: {:<8.6e} | {:<#11.9e} < fitness < {:<#11.9e} | {:<#11.9e} < frequency < {:>#11.9e} | match:{} | code:{:<}'.format(dd,oo[f],accuracy,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,cstring))
+        print ('degen: {:>10} | off: {:<5.3e} | acc: {:<8.6e} | {:<11.9e} < fitness < {:<11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code:{:<}'.format(dd,oo[f],accuracy,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,cstring))
         
     print("# Run time (minutes): ",round((time.time()-starttime)/60,3))
                     
