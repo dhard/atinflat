@@ -242,8 +242,8 @@ def compute_fitness(args):
     #input m is the width-th cartesian power of site-block-match-matrices
     (m,d,o),kdmax,epsilon,coords = args
     
-    if nsites:
-        m = np.clip(m,None,nsites)
+    ## if nsites:
+    ##     m = np.clip(m,None,nsites)
     ## compute energies and kinetic off-rates between tRNAs and aaRSs from the match matrix
     #kd = 1/((1 / kdmax) * np.exp(m * epsilon)) # # K_ij = (kdmax)^-1 * exp [m_ij * epsilon], and k_d = (1/K_ij)
     kd = kdmax / np.exp(m * epsilon) 
@@ -336,7 +336,7 @@ if __name__ == '__main__':
 
     parser.add_option("-n","--nsites",
                       dest="nsites", type="int", default=None,
-                      help="set minimum number of matches to reach maximum interaction energy. nsites has the effect of numpy.clip() on the match matrices; values that exceed nsites are truncated. Default: <width>")
+                      help="set number of matches to reach dissociation rate kdnsites.  Default: <width>")
 
     parser.add_option("-p","--pairs",
                       dest="pairs", type="int", default=2,
@@ -362,9 +362,9 @@ if __name__ == '__main__':
                       dest="kdmax", type="float", default=10000,
                       help="set Kdmax in sec^-1, the maximum dissociation rate constant (weakest binding)). Default: %default")
     
-    parser.add_option("--kdmin",
-                      dest="kdmin", type="float", default=220,
-                      help="set Kdmin in sec^-1, the minimum dissociation rate constant (strongest binding)). Default: %default")
+    parser.add_option("--kdnsites",
+                      dest="kdnsites", type="float", default=220,
+                      help="set Kdnsites in sec^-1, the dissociation rate constant reached at nsites. Default: %default")
 
     parser.add_option("--verbose",
                       dest="verbose",  action="store_true",
@@ -404,7 +404,7 @@ if __name__ == '__main__':
     mask        = options.mask
     #meso        = options.meso    
     kdmax       = options.kdmax
-    kdmin       = options.kdmin
+    kdnsites    = options.kdnsites
     chunksize   = options.chunk
     poolsize    = options.pool
     cache       = options.cache
@@ -413,10 +413,11 @@ if __name__ == '__main__':
     genotypes   = options.genotypes
 
 
-    if nsites:
-        epsilon     = (log (kdmax) - log (kdmin)) / nsites
-    else:
-        epsilon     = (log (kdmax) - log (kdmin)) / width
+    ##     epsilon     = (log (kdmax) - log (kdnsites)) / nsites
+    ## else:
+    if not nsites:
+        nsites = width
+    epsilon     = (log (kdmax) - log (kdnsites)) / nsites
 
     #if pairs:
     aaRSs = pairs
@@ -456,7 +457,7 @@ if __name__ == '__main__':
     #print('# meso      :  {}'.format(meso))
     print('# length    :  {}'.format(length))
     print('# kdmax     :  {}'.format(kdmax))
-    print('# kdmin     :  {}'.format(kdmin))
+    print('# kdnsites  :  {}'.format(kdnsites))
     print('# epsilon   :  {}'.format(epsilon))
     print('# phi       :  {}'.format(phi))
     print('# beta      :  {}'.format(beta))
@@ -482,19 +483,19 @@ if __name__ == '__main__':
                     b  = match.group(0)
                     g = Bits(bin=b)
                     m = compute_match_matrix(g,width,pairs,mask)
-                    if nsites:
-                        mn = np.clip(m,None,nsites)
-                        mnstring = printline(mn)
-                        c = compute_coding_matrix(mn,kdmax,epsilon,square=True)
-                    else:
-                        c = compute_coding_matrix(m,kdmax,epsilon,square=True)
+                    ## if nsites:
+                    ##     mn = np.clip(m,None,nsites)
+                    ##     mnstring = printline(mn)
+                    ##     c = compute_coding_matrix(mn,kdmax,epsilon,square=True)
+                    ## else:
+                    c = compute_coding_matrix(m,kdmax,epsilon,square=True)
                     mstring = printline(m)
                     cstring = printline(np.round(c,2))
                     f = compute_fitness_given_coding_matrix(c,coords)
-                    if nsites:
-                        print ('genotype: {} | match: {} | clipped-match: {} | code: {} | fitness: {}'.format(b,mstring,mnstring,cstring,f))
-                    else:
-                        print ('genotype: {} | match: {} | code: {} | fitness: {}'.format(b,mstring,cstring,f))
+                    ## if nsites:
+                    ##     print ('genotype: {} | match: {} | clipped-match: {} | code: {} | fitness: {}'.format(b,mstring,mnstring,cstring,f))
+                    ## else:
+                    print ('genotype: {} | match: {} | code: {} | fitness: {}'.format(b,mstring,cstring,f))
         os._exit(1)
 
     print('# pre-computing site-block match matrices and degeneracies...')
