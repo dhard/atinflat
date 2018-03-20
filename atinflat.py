@@ -216,9 +216,9 @@ def compute_coding_matrix(m,kdmax,epsilon,square):
     for i in range(tRNAs):
         for j in range(aaRSs):
             c [i,j] = stats.hmean(kd [i,:]/kd [i,j])/aaRSs
-    return c
+    return c,kd
 
-def compute_fitness_given_coding_matrix(c,coords):
+def compute_fitness_given_coding_matrix(c,kd,coords,rate,square):
     f     = 1
     for i in range(tRNAs):
         fc = 0
@@ -226,21 +226,22 @@ def compute_fitness_given_coding_matrix(c,coords):
             fij  = phi**(abs(coords[i] - coords[j]))
             fc  += c [i,j] * fij
         f  *= fc
+
+    if rate:
+        if square:
+            max_rate = kdmax**2
+        else:
+            max_rate = kdmax
+        f_rate = stats.hmean(np.sum(kd,axis=0)) / (aaRSs * max_rate)
+        f = (f + f_rate)/2
+  
     return f
-
-## def compute_stochkit(args):
-##     #input m is the width-th cartesian power of site-block-match-matrices computed by compute_degeneracy
-##     (m,d),kdmax,epsilon,coords = args
-
-##     ## compute energies and kinetic off-rates between tRNAs and aaRSs from the match matrix
-##     #kd = 1/((1 / kdmax) * np.exp(m * epsilon)) # # K_ij = (kdmax)^-1 * exp [m_ij * epsilon], and k_d = (1/K_ij)
-##     kd = kdmax / np.exp(m * epsilon) 
 
 
 # this is the main target function for the multiprocessing pool during computation of the landscape
 def compute_fitness(args):
     #input m is the width-th cartesian power of site-block-match-matrices
-    (m,d,o),kdmax,epsilon,coords = args
+    (m,d,o),kdmax,epsilon,coords,rate = args
     
     ## if nsites:
     ##     m = np.clip(m,None,nsites)
@@ -256,6 +257,7 @@ def compute_fitness(args):
         for j in range(aaRSs):
             c [i,j] = stats.hmean(kd [i,:]/kd [i,j])/aaRSs
             c2[i,j] = stats.hmean(kd2[i,:]/kd2[i,j])/aaRSs
+
             
     ## compute fitness bounds (f is in dead cells at equilibrium and f2 is with maximum kinetic proofreading)              
     f     = 1
@@ -268,12 +270,22 @@ def compute_fitness(args):
             fc2 += c2[i,j] * fij
         f  *= fc
         f2 *= fc2
-    return m,d,o,f,f2
+
+    g = g2 = 0
+    if rate:
+        max_rate2 = kdmax**2
+        max_rate  = kdmax
+        f_rate  = stats.hmean(np.sum(kd,axis=0))  / (aaRSs * max_rate)
+        f_rate2 = stats.hmean(np.sum(kd2,axis=0)) / (aaRSs * max_rate2)
+        g  = (f  + f_rate)/2
+        g2 = (f2 + f_rate)/2
+        
+    return m,d,o,f,f2,g,g2
 
 
 if __name__ == '__main__':
     starttime = time.time()
-    version = 0.5
+    version = 0.6
     prog = 'atinflat'
     usage = '''usage: %prog [options]
 
@@ -338,6 +350,10 @@ if __name__ == '__main__':
                       dest="nsites", type="int", default=None,
                       help="set number of matches to reach dissociation rate kdnsites.  Default: <width>")
 
+    parser.add_option("-r","--rate",
+                      dest="rate", action="store_true",
+                      help="make fitness depend not only on accuracy but also rate of dissociation.  Default: False")
+
     parser.add_option("-p","--pairs",
                       dest="pairs", type="int", default=2,
                       help="set equal number of aaRS/tRNA pairs\n Default: %default")
@@ -345,10 +361,6 @@ if __name__ == '__main__':
     parser.add_option("-m","--mask", action="store_true",
                       dest="mask",
                       help="use evolveable mask bits as per-site interaction modifiers, Default: False")
-
-    ## parser.add_option("--meso-gen", action="store_true",
-    ##                   dest="meso-gen",
-    ##                   help="generate stochkit2 xml files to compute mesoscopic coding matrix, \n Default: False")
 
     parser.add_option("-B","--beta",
                       dest="beta", type="int", default=100,
@@ -400,9 +412,9 @@ if __name__ == '__main__':
     phi         = options.phi
     width       = options.width
     nsites      = options.nsites
+    rate        = options.rate
     pairs       = options.pairs
     mask        = options.mask
-    #meso        = options.meso    
     kdmax       = options.kdmax
     kdnsites    = options.kdnsites
     chunksize   = options.chunk
@@ -453,8 +465,8 @@ if __name__ == '__main__':
     print('# aaRSs     :  {}'.format(pairs))
     print('# width     :  {}'.format(width))
     print('# nsites    :  {}'.format(nsites))
+    print('# rate    :  {}'.format(rate))
     print('# mask      :  {}'.format(mask))
-    #print('# meso      :  {}'.format(meso))
     print('# length    :  {}'.format(length))
     print('# kdmax     :  {}'.format(kdmax))
     print('# kdnsites  :  {}'.format(kdnsites))
@@ -488,10 +500,10 @@ if __name__ == '__main__':
                     ##     mnstring = printline(mn)
                     ##     c = compute_coding_matrix(mn,kdmax,epsilon,square=True)
                     ## else:
-                    c = compute_coding_matrix(m,kdmax,epsilon,square=True)
+                    c,kd = compute_coding_matrix(m,kdmax,epsilon,square=True)
                     mstring = printline(m)
                     cstring = printline(np.round(c,2))
-                    f = compute_fitness_given_coding_matrix(c,coords)
+                    f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
                     ## if nsites:
                     ##     print ('genotype: {} | match: {} | clipped-match: {} | code: {} | fitness: {}'.format(b,mstring,mnstring,cstring,f))
                     ## else:
@@ -563,7 +575,7 @@ if __name__ == '__main__':
     match_matrices = match_matrices_gen(tRNAs,aaRSs,cache)
 
     pool = multiprocessing.Pool(processes=poolsize)
-    args = zip(match_matrices,repeat(kdmax),repeat(epsilon),repeat((coords)))
+    args = zip(match_matrices,repeat(kdmax),repeat(epsilon),repeat((coords)),repeat(rate))
 
     ## this also needs to become a diskcache if pairs > 4 (?)
     # mm = dict()
@@ -582,9 +594,13 @@ if __name__ == '__main__':
     #    else:
 
     
-    for m,d,o,f,f2 in pool.imap(compute_fitness,args,chunksize=chunksize):
+    for m,d,o,f,f2,g,g2 in pool.imap(compute_fitness,args,chunksize=chunksize):
         
         fk  = round(f,10) ## THIS IS A GIANT HACK
+        if rate:
+            f = g
+            f2 = g2
+            fk = round(f,10)
         
         if fk in dd:
             dd[fk]        += d
@@ -626,9 +642,10 @@ if __name__ == '__main__':
     for f,dd in sorted(dd.items(),key=operator.itemgetter(0)):
         m        = mmatrix(f)
         mstring  = printline(m)
-        c        = compute_coding_matrix(m,kdmax,epsilon,square=False)
+        c,kd     = compute_coding_matrix(m,kdmax,epsilon,square=False)
+
         acc      = get_accuracy(c)
-        c2       = compute_coding_matrix(m,kdmax,epsilon,square=True)
+        c2,kd    = compute_coding_matrix(m,kdmax,epsilon,square=True)
         acc2     = get_accuracy(c2)
         cstring  = printline(np.round(c,3))
         print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {:<11.9e} < fitness < {:<11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(proofread):{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,cstring))
