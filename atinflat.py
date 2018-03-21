@@ -5,7 +5,7 @@ from optparse import OptionParser, OptionValueError
 #from types import FloatType
 from scipy import stats
 from bitstring import Bits
-from math import log
+from math import log, exp
 from decimal import *
 import itertools
 from itertools import repeat, chain, combinations, product, combinations_with_replacement
@@ -224,17 +224,19 @@ def compute_fitness_given_coding_matrix(c,kd,coords,rate,square):
         fc = 0
         for j in range(aaRSs):
             fij  = phi**(abs(coords[i] - coords[j]))
-            fc  += c [i,j] * fij
+            if rate:
+                fc  += c [i,j] * fij
+            else:
+                fc  += c [i,j] * fij
         f  *= fc
 
     if rate:
+        avg_kd  = stats.hmean(np.diagonal(kd))
         if square:
-            max_rate = kdmax**2
+            f      *= 1.0 - exp(-1.505764 * avg_kd / 9680) # curve fit to data of Paulander et al (2007)
         else:
-            max_rate = kdmax
-        f_rate = stats.hmean(np.sum(kd,axis=0)) / (aaRSs * max_rate)
-        f = (f + f_rate)/2
-  
+            f      *= 1.0 - exp(-1.505764 * avg_kd / 44)   # curve fit to data of Paulander et al (2007)
+
     return f
 
 
@@ -262,25 +264,31 @@ def compute_fitness(args):
     ## compute fitness bounds (f is in dead cells at equilibrium and f2 is with maximum kinetic proofreading)              
     f     = 1
     f2    = 1
+
+    if rate:
+        max_rate2 = kdmax**2
+        max_rate  = kdmax
+    
     for i in range(tRNAs):
         fc = fc2 = 0
         for j in range(aaRSs):
             fij  = phi**(abs(coords[i] - coords[j]))
-            fc  += c [i,j] * fij
-            fc2 += c2[i,j] * fij
+            if rate:
+                fc  += c [i,j] * fij * (kd[i,j]/max_rate) 
+                fc2 += c2[i,j] * fij * (kd[i,j]/max_rate2) 
+            else:
+                fc  += c [i,j] * fij
+                fc2 += c2[i,j] * fij
         f  *= fc
         f2 *= fc2
 
-    g = g2 = 0
     if rate:
-        max_rate2 = kdmax**2
-        max_rate  = kdmax
-        f_rate  = stats.hmean(np.sum(kd,axis=0))  / (aaRSs * max_rate)
-        f_rate2 = stats.hmean(np.sum(kd2,axis=0)) / (aaRSs * max_rate2)
-        g  = (f  + f_rate)/2
-        g2 = (f2 + f_rate)/2
-        
-    return m,d,o,f,f2,g,g2
+        avg_kd  = stats.hmean(np.diagonal(kd))
+        avg_kd2 = stats.hmean(np.diagonal(kd2))
+        f      *=  1.0 - exp(-1.505764 * avg_kd / 44)   # from curve fit to ref Paulander
+        f2     *=  1.0 - exp(-1.505764 * avg_kd / 9680) # from curve fit to ref Paulander
+    
+    return m,d,o,f,f2
 
 
 if __name__ == '__main__':
@@ -384,7 +392,7 @@ if __name__ == '__main__':
 
     parser.add_option("-g","--genotypes",
                       dest="genotypes", type="string", default=None,
-                      help="compute match and code matrices and fitness for binary string genotypes in file and exits. If mask is True, genotype format is t11..t1w.a11..a1w...tP1..tPw.aP1..aPw.m11..m1w.n11..n1w...nP1..nPw, where mij is the maskbit for tij, nij is the maskbit for aij, w is <width> and P is <pairs>. You must set other parameters manually to match your genotype format. Default: %default")
+                      help="compute match and code matrices and fitness for binary string genotypes in file and exits. Assumes proofreading. If mask is True, genotype format is t11..t1w.a11..a1w...tP1..tPw.aP1..aPw.m11..m1w.n11..n1w...nP1..nPw, where mij is the maskbit for tij, nij is the maskbit for aij, w is <width> and P is <pairs>. You must set other parameters manually to match your genotype format. Default: %default")
 
     parser.add_option("--chunk",
                       dest="chunk", type="int", default=5,
@@ -465,7 +473,7 @@ if __name__ == '__main__':
     print('# aaRSs     :  {}'.format(pairs))
     print('# width     :  {}'.format(width))
     print('# nsites    :  {}'.format(nsites))
-    print('# rate    :  {}'.format(rate))
+    print('# rate      :  {}'.format(rate))
     print('# mask      :  {}'.format(mask))
     print('# length    :  {}'.format(length))
     print('# kdmax     :  {}'.format(kdmax))
@@ -495,18 +503,11 @@ if __name__ == '__main__':
                     b  = match.group(0)
                     g = Bits(bin=b)
                     m = compute_match_matrix(g,width,pairs,mask)
-                    ## if nsites:
-                    ##     mn = np.clip(m,None,nsites)
-                    ##     mnstring = printline(mn)
-                    ##     c = compute_coding_matrix(mn,kdmax,epsilon,square=True)
-                    ## else:
                     c,kd = compute_coding_matrix(m,kdmax,epsilon,square=True)
                     mstring = printline(m)
                     cstring = printline(np.round(c,2))
                     f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
-                    ## if nsites:
-                    ##     print ('genotype: {} | match: {} | clipped-match: {} | code: {} | fitness: {}'.format(b,mstring,mnstring,cstring,f))
-                    ## else:
+
                     print ('genotype: {} | match: {} | code: {} | fitness: {}'.format(b,mstring,cstring,f))
         os._exit(1)
 
