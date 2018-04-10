@@ -4,7 +4,7 @@ from __future__ import print_function
 from optparse import OptionParser, OptionValueError
 #from types import FloatType
 from scipy import stats
-from bitstring import Bits
+from bitstring import Bits, BitArray
 from math import log, exp
 from decimal import *
 import itertools
@@ -17,6 +17,8 @@ import time, sys, re, os, operator
 import numpy as np
 import pdb
 import joblib
+
+
 
 def printline(m):
     return re.sub('  ',' ',re.sub('\n',',',np.array2string(m)))
@@ -123,8 +125,8 @@ def compute_degeneracy(tRNAs,aaRSs,mask,cache):
                     sbm_matrix(key,m)
                 else:
                     sbmmd[key] = m
-            off[key] = len(offm | offn)
-            zeros -= 1
+                off[key] = len(offm | offn)
+                zeros -= 1
             
     else:
         genotypes = genotypes_gen(tRNAs,aaRSs)
@@ -203,11 +205,11 @@ def compute_match_matrix(g,width,pairs,mask):
                 m[i,j]   = (taxnor).count(1)
     return m
 
-def compute_coding_matrix(m,kdmax,epsilon,square):
+def compute_coding_matrix(m,kdnc,iota,square):
     ## compute energies and kinetic off-rates between tRNAs and aaRSs from the match matrix
-    #kd = 1/((1 / kdmax) * np.exp(m * epsilon)) # # K_ij = (kdmax)^-1 * exp [m_ij * epsilon], and k_d = (1/K_ij)
+    #kd = 1/((1 / kdnc) * np.exp(m * iota)) # # K_ij = (kdnc)^-1 * exp [m_ij * iota], and k_d = (1/K_ij)
 
-    kd = kdmax / np.exp(m * epsilon)
+    kd = kdnc / np.exp(m * iota)
     if square:
         kd = kd**2
 
@@ -243,13 +245,13 @@ def compute_fitness_given_coding_matrix(c,kd,coords,rate,square):
 # this is the main target function for the multiprocessing pool during computation of the landscape
 def compute_fitness(args):
     #input m is the width-th cartesian power of site-block-match-matrices
-    (m,d,o),kdmax,epsilon,coords,rate = args
+    (m,d,o),kdnc,iota,coords,rate = args
     
     ## if nsites:
     ##     m = np.clip(m,None,nsites)
     ## compute energies and kinetic off-rates between tRNAs and aaRSs from the match matrix
-    #kd = 1/((1 / kdmax) * np.exp(m * epsilon)) # # K_ij = (kdmax)^-1 * exp [m_ij * epsilon], and k_d = (1/K_ij)
-    kd = kdmax / np.exp(m * epsilon) 
+    #kd = 1/((1 / kdnc) * np.exp(m * iota)) # # K_ij = (kdnc)^-1 * exp [m_ij * iota], and k_d = (1/K_ij)
+    kd = kdnc / np.exp(m * iota) 
     kd2 = kd**2
 
     ## compute the "code matrix" of conditional decoding probabilities 
@@ -265,35 +267,28 @@ def compute_fitness(args):
     f     = 1
     f2    = 1
 
-    if rate:
-        max_rate2 = kdmax**2
-        max_rate  = kdmax
-    
     for i in range(tRNAs):
         fc = fc2 = 0
         for j in range(aaRSs):
             fij  = phi**(abs(coords[i] - coords[j]))
-            if rate:
-                fc  += c [i,j] * fij * (kd[i,j]/max_rate) 
-                fc2 += c2[i,j] * fij * (kd[i,j]/max_rate2) 
-            else:
-                fc  += c [i,j] * fij
-                fc2 += c2[i,j] * fij
+            fc  += c [i,j] * fij
+            fc2 += c2[i,j] * fij
         f  *= fc
         f2 *= fc2
 
+    
     if rate:
         avg_kd  = stats.hmean(np.diagonal(kd))
-        avg_kd2 = stats.hmean(np.diagonal(kd2))
-        f      *=  1.0 - exp(-1.505764 * avg_kd / 44)   # from curve fit to ref Paulander
-        f2     *=  1.0 - exp(-1.505764 * avg_kd / 9680) # from curve fit to ref Paulander
+        avg_kd2  = stats.hmean(np.diagonal(kd2))
+        f2      *= 1.0 - exp(-1.505764 * avg_kd2 / 9680) # curve fit to data of Paulander et al (2007)
+        f       *= 1.0 - exp(-1.505764 * avg_kd / 44)   # curve fit to data of Paulander et al (2007)
     
     return m,d,o,f,f2
 
 
 if __name__ == '__main__':
     starttime = time.time()
-    version = 0.6
+    version = 0.9
     prog = 'atinflat'
     usage = '''usage: %prog [options]
 
@@ -350,13 +345,13 @@ if __name__ == '__main__':
     parser = OptionParser(usage=usage,version='{:<3s} version {:3.1f}'.format(prog,version))
     parser.disable_interspersed_args()
     
-    parser.add_option("-w","--width",
+    parser.add_option("-n","--width",
                       dest="width", type="int", default=2,
                       help="set interaction interface width/max matches, Default: %default")
 
-    parser.add_option("-n","--nsites",
-                      dest="nsites", type="int", default=None,
-                      help="set number of matches to reach dissociation rate kdnsites.  Default: <width>")
+    parser.add_option("-k","--matches",
+                      dest="matches", type="int", default=None,
+                      help="set number of matches required to reach the dissociation rate of cognate pairs, kdc.  Default: <width>")
 
     parser.add_option("-r","--rate",
                       dest="rate", action="store_true",
@@ -366,7 +361,7 @@ if __name__ == '__main__':
                       dest="pairs", type="int", default=2,
                       help="set equal number of aaRS/tRNA pairs\n Default: %default")
     
-    parser.add_option("-m","--mask", action="store_true",
+    parser.add_option("--mask", action="store_true",
                       dest="mask",
                       help="use evolveable mask bits as per-site interaction modifiers, Default: False")
 
@@ -378,13 +373,13 @@ if __name__ == '__main__':
                       dest="phi", type="float", default=0.99,
                       help="set phi, the maximum missense fitness-per-site penalty, 0 < phi < 1. See Sella and Ardell (2001). Default: %default")
     
-    parser.add_option("--kdmax",
-                      dest="kdmax", type="float", default=10000,
-                      help="set Kdmax in sec^-1, the maximum dissociation rate constant (weakest binding)). Default: %default")
+    parser.add_option("--kdnc",
+                      dest="kdnc", type="float", default=10000,
+                      help="set kdnc in sec^-1, the maximum dissociation rate constant (weakest binding) for non-cognate pairs). Default: %default")
     
-    parser.add_option("--kdnsites",
-                      dest="kdnsites", type="float", default=220,
-                      help="set Kdnsites in sec^-1, the dissociation rate constant reached at nsites. Default: %default")
+    parser.add_option("--kdc",
+                      dest="kdc", type="float", default=220,
+                      help="set kdc in sec^-1, the dissociation rate constant reached at nsites. Default: %default")
 
     parser.add_option("--verbose",
                       dest="verbose",  action="store_true",
@@ -393,6 +388,15 @@ if __name__ == '__main__':
     parser.add_option("-g","--genotypes",
                       dest="genotypes", type="string", default=None,
                       help="compute match and code matrices and fitness for binary string genotypes in file and exits. Assumes proofreading. If mask is True, genotype format is t11..t1w.a11..a1w...tP1..tPw.aP1..aPw.m11..m1w.n11..n1w...nP1..nPw, where mij is the maskbit for tij, nij is the maskbit for aij, w is <width> and P is <pairs>. You must set other parameters manually to match your genotype format. Default: %default")
+
+    parser.add_option("--mutate",
+                      dest="mutate", action="store_true",
+                      help="also compute results for all single- and double-mutants of genotypes input with -g. Default: False")
+
+    parser.add_option("--show-dissociation",
+                      dest="show_dissociation", action="store_true",
+                      help="show dissociation rate matrix in output for genotypes. Default: False")
+
 
     parser.add_option("--chunk",
                       dest="chunk", type="int", default=5,
@@ -419,27 +423,25 @@ if __name__ == '__main__':
     beta        = options.beta
     phi         = options.phi
     width       = options.width
-    nsites      = options.nsites
+    matches     = options.matches
     rate        = options.rate
     pairs       = options.pairs
     mask        = options.mask
-    kdmax       = options.kdmax
-    kdnsites    = options.kdnsites
+    kdnc        = options.kdnc
+    kdc         = options.kdc
     chunksize   = options.chunk
     poolsize    = options.pool
     cache       = options.cache
 
     verbose     = options.verbose
     genotypes   = options.genotypes
+    mutate      = options.mutate
+    show_dissociation = options.show_dissociation
 
+    if not matches:
+        matches = width
+    iota     = (log (kdnc) - log (kdc)) / matches
 
-    ##     epsilon     = (log (kdmax) - log (kdnsites)) / nsites
-    ## else:
-    if not nsites:
-        nsites = width
-    epsilon     = (log (kdmax) - log (kdnsites)) / nsites
-
-    #if pairs:
     aaRSs = pairs
     tRNAs = pairs
     length      = width * (tRNAs + aaRSs)
@@ -468,26 +470,28 @@ if __name__ == '__main__':
     print('# execution command:')
     print('# '+' '.join(myargv))
     print('#')
-    print('# pairs     :  {}'.format(pairs))
-    print('# tRNAs     :  {}'.format(pairs))
-    print('# aaRSs     :  {}'.format(pairs))
-    print('# width     :  {}'.format(width))
-    print('# nsites    :  {}'.format(nsites))
-    print('# rate      :  {}'.format(rate))
-    print('# mask      :  {}'.format(mask))
-    print('# length    :  {}'.format(length))
-    print('# kdmax     :  {}'.format(kdmax))
-    print('# kdnsites  :  {}'.format(kdnsites))
-    print('# epsilon   :  {}'.format(epsilon))
-    print('# phi       :  {}'.format(phi))
-    print('# beta      :  {}'.format(beta))
-    print('# coords    :  {}'.format(coords))
+    print('# pairs      :  {}'.format(pairs))
+    #  print('# tRNAs     :  {}'.format(pairs))
+    #  print('# aaRSs     :  {}'.format(pairs))
+    print('# width (n)  :  {}'.format(width))
+    print('# matches(k) :  {}'.format(matches))
+    print('# mask       :  {}'.format(mask))
+    print('# rate       :  {}'.format(rate))    
+    print('# kdnc       :  {}'.format(kdnc))
+    print('# kdc        :  {}'.format(kdc))
+    print('# iota       :  {}'.format(iota))
+    print('# phi        :  {}'.format(phi))
+    print('# beta       :  {}'.format(beta))
+    print('# length     :  {}'.format(length))
+    print('# coords     :  {}'.format(coords))
     print('#')
-    print('# verbose   :  {}'.format(verbose))
-    print('# genotypes :  {}'.format(genotypes))
-    print('# pool-size :  {}'.format(poolsize))
-    print('# chunk-size:  {}'.format(chunksize))
-    print('# cache     :  {}'.format(cache))
+    print('# verbose    :  {}'.format(verbose))
+    print('# genotypes  :  {}'.format(genotypes))
+    print('# mutate     :  {}'.format(mutate))
+    print('# show-dissociation:  {}'.format(show_dissociation))
+    print('# pool-size  :  {}'.format(poolsize))
+    print('# chunk-size :  {}'.format(chunksize))
+    print('# cache      :  {}'.format(cache))
     print('#')
     if genotypes:
         print('#')
@@ -497,18 +501,62 @@ if __name__ == '__main__':
         # this will be updated to print the off-mask statistic
         with open(genotypes) as f:
             for line in f:
-                strip = re.sub('\s+','',line)
-                match = re.search('^[01]+', strip)
+                strip1 = re.sub('#.*','',line)
+                strip2 = re.sub('\s+','',strip1)
+                match = re.search('^[01]+', strip2)
                 if match:
                     b  = match.group(0)
                     g = Bits(bin=b)
                     m = compute_match_matrix(g,width,pairs,mask)
-                    c,kd = compute_coding_matrix(m,kdmax,epsilon,square=True)
-                    mstring = printline(m)
-                    cstring = printline(np.round(c,2))
+                    c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
+                    mstring  = printline(m)
+                    cstring  = printline(np.round(c,2))
                     f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
-
-                    print ('genotype: {} | match: {} | code: {} | fitness: {}'.format(b,mstring,cstring,f))
+                    if show_dissociation:
+                        kdstring = printline(kd)
+                        print ('genotype: {} | fitness: {} | match: {} | dissociation: {} | proofread code: {}'.format(b,f,mstring,kdstring,cstring))
+                    else:
+                        print ('genotype: {} | fitness: {} | match: {} | proofread code: {}'.format(b,f,mstring,cstring))                        
+                    if mutate: ## DHA032918. THIS WAS DRAFTED BUT NEVER USED OR TESTED 
+                        gf = f
+                        d = dict()
+                        a = BitArray(g)
+                        for i in range(g.len):
+                            a.invert(i)
+                            g = Bits(a)
+                            b = g.bin
+                            m = compute_match_matrix(g,width,pairs,mask)
+                            c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
+                            mstring  = printline(m)
+                            cstring  = printline(np.round(c,2))
+                            f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
+                            d[i] = f
+                            if show_dissociation:
+                                kdstring = printline(kd)
+                                print ('genotype: {} | mutate: {} | fitness: {} | match: {} | dissociation: {} | proofread code: {}'.format(b,i,f,mstring,kdstring,cstring))
+                            else:
+                                print ('genotype: {} | mutate: {} | fitness: {} | match: {} | proofread code: {}'.format(b,i,f,mstring,cstring))  
+                            a.invert(i)
+                        for i in range(g.len):
+                            for j in range(i+1,g.len):
+                                a.invert(i)
+                                a.invert(j)
+                                g = Bits(a)
+                                b = g.bin
+                                m = compute_match_matrix(g,width,pairs,mask)
+                                c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
+                                mstring  = printline(m)
+                                cstring  = printline(np.round(c,2))
+                                f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
+                                e = ((gf*f) - (d[i]*d[j]))
+                                if show_dissociation:
+                                    kdstring = printline(kd)
+                                    print ('genotype: {} | mutate: {} | {} | fitness: {} | epistasis: {} | match: {} | dissociation: {} | proofread code: {}'.format(b,i,j,f,e,mstring,kdstring,cstring))
+                                else:
+                                    print ('genotype: {} | mutate: {} | {} | fitness: {} | epistasis: {} | match: {} | proofread code: {}'.format(b,i,j,f,e,mstring,cstring))  
+                                a.invert(i)
+                                a.invert(j)
+                    
         os._exit(1)
 
     print('# pre-computing site-block match matrices and degeneracies...')
@@ -576,7 +624,7 @@ if __name__ == '__main__':
     match_matrices = match_matrices_gen(tRNAs,aaRSs,cache)
 
     pool = multiprocessing.Pool(processes=poolsize)
-    args = zip(match_matrices,repeat(kdmax),repeat(epsilon),repeat((coords)),repeat(rate))
+    args = zip(match_matrices,repeat(kdnc),repeat(iota),repeat((coords)),repeat(rate))
 
     ## this also needs to become a diskcache if pairs > 4 (?)
     # mm = dict()
@@ -595,13 +643,9 @@ if __name__ == '__main__':
     #    else:
 
     
-    for m,d,o,f,f2,g,g2 in pool.imap(compute_fitness,args,chunksize=chunksize):
+    for m,d,o,f,f2 in pool.imap(compute_fitness,args,chunksize=chunksize):
         
         fk  = round(f,10) ## THIS IS A GIANT HACK
-        if rate:
-            f = g
-            f2 = g2
-            fk = round(f,10)
         
         if fk in dd:
             dd[fk]        += d
@@ -643,13 +687,16 @@ if __name__ == '__main__':
     for f,dd in sorted(dd.items(),key=operator.itemgetter(0)):
         m        = mmatrix(f)
         mstring  = printline(m)
-        c,kd     = compute_coding_matrix(m,kdmax,epsilon,square=False)
-
+        c,kd     = compute_coding_matrix(m,kdnc,iota,square=False)
         acc      = get_accuracy(c)
-        c2,kd    = compute_coding_matrix(m,kdmax,epsilon,square=True)
+        c2,kd    = compute_coding_matrix(m,kdnc,iota,square=True)
         acc2     = get_accuracy(c2)
         cstring  = printline(np.round(c,3))
-        print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {:<11.9e} < fitness < {:<11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(proofread):{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,cstring))
-        
+        c2string  = printline(np.round(c2,3))
+        if show_dissociation:
+            kdstring = printline(kd)
+            print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {:<11.9e} < fitness < {:<11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring,kdstring))
+        else:
+            print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {:<11.9e} < fitness < {:<11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring))
     print("# Run time (minutes): ",round((time.time()-starttime)/60,3))
                     
