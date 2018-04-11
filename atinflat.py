@@ -34,18 +34,18 @@ def powerset(iterable):
 def masked_genotypes_gen(tRNAs,aaRSs):
     for sm in powerset(range(tRNAs)):
         setm = set(sm)
-        if bool(setm):
-            for sn in powerset(range(aaRSs)):
-                setn = set(sn)
-                if bool(setn):
-                    for st in powerset(range(tRNAs)):
-                        sett     = set(st)
-                        if bool(sett & setm):
-                            for sa in powerset(range(aaRSs)):
-                                seta     = set(sa)
-                                if bool(seta & setn):
-                                    yield setm,setn,sett,seta
-
+        for sn in powerset(range(aaRSs)):
+            setn = set(sn)
+            #if (bool(setm) and bool(setn) and bool(setm & setn)):
+            for st in powerset(range(tRNAs)):
+                sett     = set(st)
+                #if bool(sett & setm):
+                for sa in powerset(range(aaRSs)):
+                    seta     = set(sa)
+                    #if bool(seta & setn):
+                    yield setm,setn,sett,seta
+                            
+                            
 def genotypes_gen(tRNAs,aaRSs):
     for st in powerset(range(tRNAs)):
         sett     = set(st)
@@ -90,48 +90,53 @@ def compute_degeneracy(tRNAs,aaRSs,mask,cache):
     """
     uni_t       = set(range(tRNAs))
     uni_a       = set(range(aaRSs))
-    if mask:
-        zeros   = 2**(2*(tRNAs+aaRSs))
-    else:
-        zeros   = 2**(tRNAs+aaRSs)
+    ## if mask:
+    ##     zeros   = 2**(2*(tRNAs+aaRSs))
+    ## else:
+    ##     zeros   = 2**(tRNAs+aaRSs)
 
     if mask:
         genotypes = masked_genotypes_gen(tRNAs,aaRSs)
         for setm,setn,sett,seta in genotypes:
-            offm = uni_t - setm
-            offn = uni_a - setn
-            settc    = uni_t - sett
+            offm      = uni_t - setm
+            offn      = uni_a - setn
+            eoff      = len(offm) + len(offn)
+            settc     = uni_t - sett
             sett     &= setm
             settc    &= setm
             setac     = uni_a - seta
             seta     &= setn
             setac    &= setn
 
+
             m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
             for match in chain(product(sett,seta),product(settc,setac)):
                 m[match] += 1
-            if (m==0).all():
-                print ('# huh! in compute_degeneracy') # why do we get here?
-                continue
+                # if (m==0).all():
+                 ##print ('# huh! in compute_degeneracy') # why do we get here?
+                # continue
             key = joblib.hash(m)
-            
+            #if key == '3d364cbacfad5c8c2be9dc4314aec17c':
+            #    pdb.set_trace()
             if key in degeneracy:
                 degeneracy[key] += 1
-                zeros -= 1
-                off[key] += len(offm | offn)
+                off[key]        += eoff / (2 * pairs * width)
             else:
                 degeneracy[key] = 1
+                off[key]        = eoff / (2 * pairs * width)
                 if cache:
-                    sbm_matrix(key,m)
+                     sbm_matrix(key,m) # THIS IS NOT TESTED
                 else:
                     sbmmd[key] = m
-                off[key] = len(offm | offn)
-                zeros -= 1
-            
+                #zeros -= 1
+ 
+        for key in off:
+            off[key] /= degeneracy[key]
+        #pdb.set_trace()
     else:
         genotypes = genotypes_gen(tRNAs,aaRSs)
         for sett,seta in genotypes:
-            settc    = uni_t - sett
+            settc     = uni_t - sett
             setac     = uni_a - seta        
             m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
             for match in chain(product(sett,seta),product(settc,setac)):
@@ -140,25 +145,27 @@ def compute_degeneracy(tRNAs,aaRSs,mask,cache):
             
             if key in degeneracy:
                 degeneracy[key] += 1
-                zeros -= 1
+                #zeros -= 1
             else:
                 degeneracy[key] = 1
                 if cache:
-                    sbm_matrix(key,m)
+                    sbm_matrix(m) # THIS IS NOT TESTED
                 else:
                     sbmmd[key] = m
-                zeros -= 1
-    if zeros:
-        m0  = np.zeros((tRNAs,aaRSs),dtype=np.int16)
-        key = joblib.hash(m0)
-        degeneracy[key] = zeros
-        off[key]        = 0
-        if cache:
-            sbm_matrix(key,m0) # matrix[key] = mmatrix[key] = m0
-        else:
-            sbmmd[key] = m0
+
+                #zeros -= 1
+    ## if zeros:
+    ##     m0  = np.zeros((tRNAs,aaRSs),dtype=np.int16)
+    ##     key = joblib.hash(m0)
+    ##     degeneracy[key] = zeros
+    ##     off[key]        = 0
+    ##     if cache:
+    ##         sbm_matrix(key,m0) # matrix[key] = mmatrix[key] = m0
+    ##     else:
+    ##         sbmmd[key] = m0
 
 def compute_match_matrix(g,width,pairs,mask):
+    # this is for genotype files
     length  = 2 * width * (pairs)
     tbegin  = 0
     tend    = width
@@ -195,15 +202,21 @@ def compute_match_matrix(g,width,pairs,mask):
             
     ## compute matching function
     m = np.zeros((pairs,pairs),dtype=np.int16)
+    o = 0
     for i in range(pairs):
+        if mask:
+            o       +=  mt[i].count(0) + ma[i].count(0)
         for j in range(pairs): 
             taxnor       = ~(t[i] ^ a[j])
             if mask:
-                maskand  =  mt[i] & ma[j]  
+                maskand  =  mt[i] & ma[j]
                 m[i,j]   = (maskand & taxnor).count(1)
             else:
                 m[i,j]   = (taxnor).count(1)
-    return m
+
+    ## compute off mask
+    o /=  2 * width * (pairs)
+    return m,o
 
 def compute_coding_matrix(m,kdnc,iota,square):
     ## compute energies and kinetic off-rates between tRNAs and aaRSs from the match matrix
@@ -288,7 +301,7 @@ def compute_fitness(args):
 
 if __name__ == '__main__':
     starttime = time.time()
-    version = 0.9
+    version = 1.0
     prog = 'atinflat'
     usage = '''usage: %prog [options]
 
@@ -507,196 +520,202 @@ if __name__ == '__main__':
                 if match:
                     b  = match.group(0)
                     g = Bits(bin=b)
-                    m = compute_match_matrix(g,width,pairs,mask)
+                    m,o = compute_match_matrix(g,width,pairs,mask)
                     c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
                     mstring  = printline(m)
                     cstring  = printline(np.round(c,2))
                     f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
                     if show_dissociation:
                         kdstring = printline(kd)
-                        print ('genotype: {} | fitness: {} | match: {} | dissociation: {} | proofread code: {}'.format(b,f,mstring,kdstring,cstring))
+                        print ('genotype: {} | off: {:<5.3e} | fitness: {: <11.9e} | match: {} | dissociation: {} | proofread code: {}'.format(b,o,f,mstring,kdstring,cstring))
+                        #print ('genotype: {} | fitness: {: <11.9e} | match: {} | dissociation: {} | proofread code: {}'.format(b,f,mstring,kdstring,cstring))
                     else:
-                        print ('genotype: {} | fitness: {} | match: {} | proofread code: {}'.format(b,f,mstring,cstring))                        
-                    if mutate: ## DHA032918. THIS WAS DRAFTED BUT NEVER USED OR TESTED 
-                        gf = f
-                        d = dict()
-                        a = BitArray(g)
-                        for i in range(g.len):
-                            a.invert(i)
-                            g = Bits(a)
-                            b = g.bin
-                            m = compute_match_matrix(g,width,pairs,mask)
-                            c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
-                            mstring  = printline(m)
-                            cstring  = printline(np.round(c,2))
-                            f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
-                            d[i] = f
-                            if show_dissociation:
-                                kdstring = printline(kd)
-                                print ('genotype: {} | mutate: {} | fitness: {} | match: {} | dissociation: {} | proofread code: {}'.format(b,i,f,mstring,kdstring,cstring))
-                            else:
-                                print ('genotype: {} | mutate: {} | fitness: {} | match: {} | proofread code: {}'.format(b,i,f,mstring,cstring))  
-                            a.invert(i)
-                        for i in range(g.len):
-                            for j in range(i+1,g.len):
-                                a.invert(i)
-                                a.invert(j)
-                                g = Bits(a)
-                                b = g.bin
-                                m = compute_match_matrix(g,width,pairs,mask)
-                                c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
-                                mstring  = printline(m)
-                                cstring  = printline(np.round(c,2))
-                                f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
-                                e = ((gf*f) - (d[i]*d[j]))
-                                if show_dissociation:
-                                    kdstring = printline(kd)
-                                    print ('genotype: {} | mutate: {} | {} | fitness: {} | epistasis: {} | match: {} | dissociation: {} | proofread code: {}'.format(b,i,j,f,e,mstring,kdstring,cstring))
-                                else:
-                                    print ('genotype: {} | mutate: {} | {} | fitness: {} | epistasis: {} | match: {} | proofread code: {}'.format(b,i,j,f,e,mstring,cstring))  
-                                a.invert(i)
-                                a.invert(j)
+                        print ('genotype: {} | off: {:<5.3e} | fitness: {: <11.9e} | match: {} | proofread code: {}'.format(b,o,f,mstring,cstring))                        
+                    ## if mutate: ## DHA032918. THIS WAS DRAFTED BUT NEVER USED OR TESTED 
+                    ##     gf = f
+                    ##     d = dict()
+                    ##     a = BitArray(g)
+                    ##     for i in range(g.len):
+                    ##         a.invert(i)
+                    ##         g = Bits(a)
+                    ##         b = g.bin
+                    ##         m = compute_match_matrix(g,width,pairs,mask)
+                    ##         c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
+                    ##         mstring  = printline(m)
+                    ##         cstring  = printline(np.round(c,2))
+                    ##         f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
+                    ##         d[i] = f
+                    ##         if show_dissociation:
+                    ##             kdstring = printline(kd)
+                    ##             print ('genotype: {} | mutate: {} | fitness: {: <11.9e} | match: {} | dissociation: {} | proofread code: {}'.format(b,i,f,mstring,kdstring,cstring))
+                    ##         else:
+                    ##             print ('genotype: {} | mutate: {} | fitness: {} | match: {} | proofread code: {}'.format(b,i,f,mstring,cstring))  
+                    ##         a.invert(i)
+                    ##     for i in range(g.len):
+                    ##         for j in range(i+1,g.len):
+                    ##             a.invert(i)
+                    ##             a.invert(j)
+                    ##             g = Bits(a)
+                    ##             b = g.bin
+                    ##             m = compute_match_matrix(g,width,pairs,mask)
+                    ##             c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
+                    ##             mstring  = printline(m)
+                    ##             cstring  = printline(np.round(c,2))
+                    ##             f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
+                    ##             e = ((gf*f) - (d[i]*d[j]))
+                    ##             if show_dissociation:
+                    ##                 kdstring = printline(kd)
+                    ##                 print ('genotype: {} | mutate: {} | {} | fitness: {: <11.9e} | epistasis: {} | match: {} | dissociation: {} | proofread code: {}'.format(b,i,j,f,e,mstring,kdstring,cstring))
+                    ##             else:
+                    ##                 print ('genotype: {} | mutate: {} | {} | fitness: {: <11.9e} | epistasis: {} | match: {} | proofread code: {}'.format(b,i,j,f,e,mstring,cstring))  
+                    ##             a.invert(i)
+                    ##             a.invert(j)
                     
-        os._exit(1)
-
-    print('# pre-computing site-block match matrices and degeneracies...')
-    print('#')
-
-    compute_degeneracy(tRNAs,aaRSs,mask,cache)
-    
-    if verbose:
-        for key,number in sorted(degeneracy.items(),reverse=True,key=operator.itemgetter(1)):
-            print('# degeneracy: {}'.format(number))
-            print(re.sub(r'( |^)\[','# \g<1>[',np.array2string(matrix[key]),count=0)) # this could be updated to print single lines per matrix
-
-    print('#')
-    print('# computing landscape for interface width {}...'.format(width))
-    print('#')
-
-    def sb_keys():
-        for key in sbmmd:
-            yield key
-
-    def key_tuples():
-        keys = sb_keys()
-        for key_tuple in combinations_with_replacement(keys,width):#product(keys,repeat=width):#
-            yield key_tuple
-
-    def get_match_matrix(tRNAs,aaRSs,key_tuple):
-        m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
-        return reduce(lambda x,y:x+sbmmd[y], key_tuple, m)
-
-    def get_match_matrix_cache(tRNAs,aaRSs,key_tuple):
-        m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
-        return reduce(lambda x,y:x+sbm_matrix(y), key_tuple, m)
-
-    def get_degeneracy(key_tuple):
-        return reduce(lambda x,y:x*degeneracy[y], key_tuple, 1)
-
-    def get_accuracy(c):
-        return np.round(stats.hmean(np.diagonal(c)),6)
-
-    def get_offmask(key_tuple):
-        return reduce(lambda x,y:x+(off[y]), key_tuple, 0)
-
-    def match_matrices_gen(tRNAs,aaRSs,cache):
-        keyss = key_tuples()
-        if cache:
-            getmm = get_match_matrix_cache
-        else:
-            getmm = get_match_matrix
-        for key_tuple in keyss:
-            m  = getmm(tRNAs,aaRSs,key_tuple)
-            d  = get_degeneracy(key_tuple)
-            if mask:
-                o  = get_offmask(key_tuple)
-            else:
-                o  = 0
-            c  = Counter(key_tuple)
-            nu = len(c)
-            k  = tuple(c.values())
-            mc = multinomial_coefficients(nu,width)
-            d *= mc[k]
-            o /= d
-            o /= width
-            yield m,d,o
-
-    match_matrices = match_matrices_gen(tRNAs,aaRSs,cache)
-
-    pool = multiprocessing.Pool(processes=poolsize)
-    args = zip(match_matrices,repeat(kdnc),repeat(iota),repeat((coords)),repeat(rate))
-
-    ## this also needs to become a diskcache if pairs > 4 (?)
-    # mm = dict()
-
-    dd = dict()
-    oo = dict()
-    fit = dict()
-    fit2 = dict()
-
-    #for arg in args:
-    #    m,d,o,f,f2    = compute_fitness(arg)
-
-    ## if (meso):
-    ##     for arg in args:
-    ##         print_stochkit2(arg)  
-    #    else:
-
-    
-    for m,d,o,f,f2 in pool.imap(compute_fitness,args,chunksize=chunksize):
+    else:
+        print('# pre-computing site-block match matrices and degeneracies...')
+        print('#')
         
-        fk  = round(f,10) ## THIS IS A GIANT HACK
-        
-        if fk in dd:
-            dd[fk]        += d
-            oo[fk]        += o
-            fb            =  fitb[fk]
-            fb2           =  fitb2[fk]
-        else:
-            dd  [fk]      =  d
-            oo  [fk]      =  o
-            fit2[fk]      =  f2
-            fb            =  f**beta
-            fitb[fk]      =  fb
-            fb2           =  f2**beta
-            fitb2[fk]     =  fb2
+        compute_degeneracy(tRNAs,aaRSs,mask,cache)
+    
+        if verbose:
+            for key,number in sorted(degeneracy.items(),reverse=True,key=operator.itemgetter(1)):
+                print('# degeneracy: {}'.format(number))
+                print(re.sub(r'( |^)\[','# \g<1>[',np.array2string(matrix[key]),count=0)) # this could be updated to print single lines per matrix
+
+        print('#')
+        print('# computing landscape for interface width {}...'.format(width))
+        print('#')
+
+        def sb_keys():
+            for key in sbmmd:
+                yield key
+
+        def key_tuples():
+            keys = sb_keys()
+            for key_tuple in combinations_with_replacement(keys,width):#product(keys,repeat=width):#
+                yield key_tuple
+
+        def get_match_matrix(tRNAs,aaRSs,key_tuple):
+            m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
+            return reduce(lambda x,y:x+sbmmd[y], key_tuple, m)
+
+        def get_match_matrix_cache(tRNAs,aaRSs,key_tuple):
+            m = np.zeros((tRNAs,aaRSs),dtype=np.int16)
+            return reduce(lambda x,y:x+sbm_matrix(y), key_tuple, m)
+
+        def get_degeneracy(key_tuple):
+            return reduce(lambda x,y:x*degeneracy[y], key_tuple, 1)
+
+        def get_accuracy(c):
+            return np.round(stats.hmean(np.diagonal(c)),6)
+
+        def get_offmask(key_tuple):
+            return reduce(lambda x,y:x+off[y], key_tuple, 0)            
+
+        def match_matrices_gen(tRNAs,aaRSs,cache):
+            keyss = key_tuples()
             if cache:
-                mmatrix(fk,m)  # mm[fk]   =  m
+                getmm = get_match_matrix_cache
             else:
-                mmd[fk] = m
+                getmm = get_match_matrix
+            for key_tuple in keyss:
+                #pdb.set_trace()
+                m  = getmm(tRNAs,aaRSs,key_tuple)
+                d  = get_degeneracy(key_tuple)
+                if mask:
+                    o  = get_offmask(key_tuple)
+                else:
+                    o  = 0
+                #pdb.set_trace()
+                c  = Counter(key_tuple)
+                nu = len(c)
+                k  = tuple(c.values())
+                mc = multinomial_coefficients(nu,width)
+                d *= mc[k]
+                yield m,d,o
+
+        match_matrices = match_matrices_gen(tRNAs,aaRSs,cache)
+
+        pool = multiprocessing.Pool(processes=poolsize)
+        args = zip(match_matrices,repeat(kdnc),repeat(iota),repeat((coords)),repeat(rate))
+
+        ## this also needs to become a diskcache if pairs > 4 (?)
+        # mm = dict()
+
+        dd = dict()
+        oo = dict()
+        fit = dict()
+        fit2 = dict()
+
+        #for arg in args:
+        #    m,d,o,f,f2    = compute_fitness(arg)
+
+        ## if (meso):
+        ##     for arg in args:
+        ##         print_stochkit2(arg)  
+        #    else:
+
+
+        for m,d,o,f,f2 in pool.imap(compute_fitness,args,chunksize=chunksize):
+
+            fk  = round(f,10) ## THIS IS A GIANT HACK
+
+            if fk in dd:
+                dd[fk]        += d
+                oo[fk]        += (d * o)
+                fb            =  fitb[fk]
+                fb2           =  fitb2[fk]
+            else:
+                dd  [fk]      =  d
+                oo  [fk]      =  (d * o)
+                fit2[fk]      =  f2
+                fb            =  f**beta
+                fitb[fk]      =  fb
+                fb2           =  f2**beta
+                fitb2[fk]     =  fb2
+                if cache:
+                    mmatrix(fk,m)  # mm[fk]   =  m
+                else:
+                    mmd[fk] = m
             
-        sfb               +=  (fb * d)
-        sffb              += ((fb * f) * d)
-        if f > maxf:
-            maxf = f
-                
-        sfb2              +=  (fb2 * d)
-        sffb2             += ((fb2 * f2) * d)
-        if f2 > maxf2:
-            maxf2 = f2
+            sfb               +=  (fb * d)
+            sffb              += ((fb * f) * d)
+            if f > maxf:
+                maxf = f
 
-    avgf         = sffb / sfb
-    load         = (maxf - avgf)/maxf
-    avgf2        = sffb2 / sfb2
-    load2        = (maxf2 - avgf2)/maxf2
-    print ('{} < maxf < {}'.format(maxf,maxf2))
-    print ('{} < avgf < {}'.format(avgf,avgf2))
-    print ('{} > load > {}'.format(load,load2))
-    print ('')
+            sfb2              +=  (fb2 * d)
+            sffb2             += ((fb2 * f2) * d)
+            if f2 > maxf2:
+                maxf2 = f2
 
-    for f,dd in sorted(dd.items(),key=operator.itemgetter(0)):
-        m        = mmatrix(f)
-        mstring  = printline(m)
-        c,kd     = compute_coding_matrix(m,kdnc,iota,square=False)
-        acc      = get_accuracy(c)
-        c2,kd    = compute_coding_matrix(m,kdnc,iota,square=True)
-        acc2     = get_accuracy(c2)
-        cstring  = printline(np.round(c,3))
-        c2string  = printline(np.round(c2,3))
-        if show_dissociation:
-            kdstring = printline(kd)
-            print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {:<11.9e} < fitness < {:<11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring,kdstring))
-        else:
-            print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {:<11.9e} < fitness < {:<11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring))
+        for fk in dd:
+            oo[fk] /= dd[fk]
+
+        avgf         = sffb / sfb
+        load         = (maxf - avgf)/maxf
+        avgf2        = sffb2 / sfb2
+        load2        = (maxf2 - avgf2)/maxf2
+        print ('{} < maxf < {}'.format(maxf,maxf2))
+        print ('{} < avgf < {}'.format(avgf,avgf2))
+        print ('{} > load > {}'.format(load,load2))
+        print ('')
+
+        for f,dd in sorted(dd.items(),key=operator.itemgetter(0)):
+            m        = mmatrix(f)
+            mstring  = printline(m)
+            c,kd     = compute_coding_matrix(m,kdnc,iota,square=False)
+            acc      = get_accuracy(c)
+            c2,kd    = compute_coding_matrix(m,kdnc,iota,square=True)
+            acc2     = get_accuracy(c2)
+            cstring  = printline(np.round(c,3))
+            c2string  = printline(np.round(c2,3))
+            if show_dissociation:
+                kdstring = printline(kd)
+                print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring,kdstring))
+                #print ('degen: {:>10} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring,kdstring))
+            else:
+                #print ('degen: {:>10} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring))
+                print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring))
+
     print("# Run time (minutes): ",round((time.time()-starttime)/60,3))
                     
