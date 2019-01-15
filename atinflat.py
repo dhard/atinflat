@@ -218,11 +218,11 @@ def compute_match_matrix(g,width,pairs,mask):
     o /=  2 * width * (pairs)
     return m,o
 
-def compute_coding_matrix(m,kdnc,iota,square):
+def compute_coding_matrix(m,kdnc,epsilon,square):
     ## compute energies and kinetic off-rates between tRNAs and aaRSs from the match matrix
-    #kd = 1/((1 / kdnc) * np.exp(m * iota)) # # K_ij = (kdnc)^-1 * exp [m_ij * iota], and k_d = (1/K_ij)
+    #kd = 1/((1 / kdnc) * np.exp(m * epsilon)) # # K_ij = (kdnc)^-1 * exp [m_ij * epsilon], and k_d = (1/K_ij)
 
-    kd = kdnc / np.exp(m * iota)
+    kd = kdnc / np.exp(m * epsilon)
     if square:
         kd = kd**2
 
@@ -239,32 +239,31 @@ def compute_fitness_given_coding_matrix(c,kd,coords,rate,square):
         fc = 0
         for j in range(aaRSs):
             fij  = phi**(abs(coords[i] - coords[j]))
-            if rate:
-                fc  += c [i,j] * fij
-            else:
-                fc  += c [i,j] * fij
+            fc  += c [i,j] * fij
         f  *= fc
 
     if rate:
-        avg_kd  = stats.hmean(np.diagonal(kd))
+        #avg_kd  = stats.hmean(np.diagonal(kd))
+        avg_kd   = stats.hmean(kd,axis=None)
         if square:
-            f      *= 1.0 - exp(-1.505764 * avg_kd / 9680) # curve fit to data of Paulander et al (2007)
+            f      *= 1.0 - exp(-1.505760 * avg_kd / 9680) # curve fit to data of Paulander et al (2007): dividing by 9680 results in a catalytic rate of 5 when the avg_kd is the square of the cognate rate
         else:
-            f      *= 1.0 - exp(-1.505764 * avg_kd / 44)   # curve fit to data of Paulander et al (2007)
+            f      *= 1.0 - exp(-1.505760 * avg_kd / 44)   # curve fit to data of Paulander et al (2007), assuming avg_k_cat = avg_kd / 44
 
     return f
+
+# this is defined for debugging purposes
+
 
 
 # this is the main target function for the multiprocessing pool during computation of the landscape
 def compute_fitness(args):
     #input m is the width-th cartesian power of site-block-match-matrices
-    (m,d,o),kdnc,iota,coords,rate = args
+    (m,d,o),kdnc,epsilon,coords,rate = args
     
-    ## if nsites:
-    ##     m = np.clip(m,None,nsites)
     ## compute energies and kinetic off-rates between tRNAs and aaRSs from the match matrix
-    #kd = 1/((1 / kdnc) * np.exp(m * iota)) # # K_ij = (kdnc)^-1 * exp [m_ij * iota], and k_d = (1/K_ij)
-    kd = kdnc / np.exp(m * iota) 
+    #kd = 1/((1 / kdnc) * np.exp(m * epsilon)) # # K_ij = (kdnc)^-1 * exp [m_ij * epsilon], and k_d = (1/K_ij)
+    kd = kdnc / np.exp(m * epsilon) 
     kd2 = kd**2
 
     ## compute the "code matrix" of conditional decoding probabilities 
@@ -291,17 +290,29 @@ def compute_fitness(args):
 
     
     if rate:
-        avg_kd  = stats.hmean(np.diagonal(kd))
-        avg_kd2  = stats.hmean(np.diagonal(kd2))
-        f2      *= 1.0 - exp(-1.505764 * avg_kd2 / 9680) # curve fit to data of Paulander et al (2007)
-        f       *= 1.0 - exp(-1.505764 * avg_kd / 44)   # curve fit to data of Paulander et al (2007)
+        #avg_kd   = stats.hmean(np.diagonal(kd))
+        #avg_kd2  = stats.hmean(np.diagonal(kd2))
+        #avg_kd   = stats.hmean(np.sum(np.multiply(kd,c),axis=1))
+        #avg_kd2  = stats.hmean(np.sum(np.multiply(kd2,c2),axis=1))
+        avg_kd   = stats.hmean(kd,axis=None)
+        avg_kd2  = stats.hmean(kd2,axis=None)
+        f2      *= 1.0 - exp(-1.505760 * avg_kd2 / 9680) # curve fit to data of Paulander et al (2007)
+        f       *= 1.0 - exp(-1.505760 * avg_kd / 44)    # curve fit to data of Paulander et al (2007)
     
     return m,d,o,f,f2
 
 
+# version 1.1: - fixes an ouput error in which the frequencies of the
+#                non-proofread and proofread genotype class were switched.
+
+# version 1.2: - revised the definition of rate-dependent fitness factor to include both
+#                cognate and non-cognate aminoacylations.
+#              - changed name of "iota" to "epsilon"
+#              - corrected curve-fit coefficient from -1.505764 to -1.505760
+#
 if __name__ == '__main__':
     starttime = time.time()
-    version = 1.0
+    version = 1.2
     prog = 'atinflat'
     usage = '''usage: %prog [options]
 
@@ -370,7 +381,7 @@ if __name__ == '__main__':
                       dest="rate", action="store_true",
                       help="make fitness depend not only on accuracy but also rate of dissociation.  Default: False")
 
-    parser.add_option("-p","--pairs",
+    parser.add_option("-P","--pairs",
                       dest="pairs", type="int", default=2,
                       help="set equal number of aaRS/tRNA pairs\n Default: %default")
     
@@ -453,7 +464,7 @@ if __name__ == '__main__':
 
     if not matches:
         matches = width
-    iota     = (log (kdnc) - log (kdc)) / matches
+    epsilon     = (log (kdnc) - log (kdc)) / matches
 
     aaRSs = pairs
     tRNAs = pairs
@@ -475,10 +486,10 @@ if __name__ == '__main__':
         coords.append(segment * a)
         
     print('# {:<3s} version {:3.1f}'.format(prog,version))
-    print('# Copyright (2018) David H. Ardell.')
+    print('# Copyright (2019) David H. Ardell.')
     print('# All Wrongs Reversed.')
     print('#')
-    print('# Please cite Collins-Hed (2018) in published works using this software.')
+    print('# Please cite Collins-Hed and Ardell (2019) in published works using this software.')
     print('#')
     print('# execution command:')
     print('# '+' '.join(myargv))
@@ -492,7 +503,7 @@ if __name__ == '__main__':
     print('# rate       :  {}'.format(rate))    
     print('# kdnc       :  {}'.format(kdnc))
     print('# kdc        :  {}'.format(kdc))
-    print('# iota       :  {}'.format(iota))
+    print('# epsilon    :  {}'.format(epsilon))
     print('# phi        :  {}'.format(phi))
     print('# beta       :  {}'.format(beta))
     print('# length     :  {}'.format(length))
@@ -521,10 +532,10 @@ if __name__ == '__main__':
                     b  = match.group(0)
                     g = Bits(bin=b)
                     m,o = compute_match_matrix(g,width,pairs,mask)
-                    c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
+                    c,kd = compute_coding_matrix(m,kdnc,epsilon,square=True)
                     mstring  = printline(m)
                     cstring  = printline(np.round(c,2))
-                    f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
+                    f  = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
                     if show_dissociation:
                         kdstring = printline(kd)
                         print ('genotype: {} | off: {:<5.3e} | fitness: {: <11.9e} | match: {} | dissociation: {} | proofread code: {}'.format(b,o,f,mstring,kdstring,cstring))
@@ -540,7 +551,7 @@ if __name__ == '__main__':
                     ##         g = Bits(a)
                     ##         b = g.bin
                     ##         m = compute_match_matrix(g,width,pairs,mask)
-                    ##         c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
+                    ##         c,kd = compute_coding_matrix(m,kdnc,epsilon,square=True)
                     ##         mstring  = printline(m)
                     ##         cstring  = printline(np.round(c,2))
                     ##         f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
@@ -558,7 +569,7 @@ if __name__ == '__main__':
                     ##             g = Bits(a)
                     ##             b = g.bin
                     ##             m = compute_match_matrix(g,width,pairs,mask)
-                    ##             c,kd = compute_coding_matrix(m,kdnc,iota,square=True)
+                    ##             c,kd = compute_coding_matrix(m,kdnc,epsilon,square=True)
                     ##             mstring  = printline(m)
                     ##             cstring  = printline(np.round(c,2))
                     ##             f = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
@@ -637,7 +648,7 @@ if __name__ == '__main__':
         match_matrices = match_matrices_gen(tRNAs,aaRSs,cache)
 
         pool = multiprocessing.Pool(processes=poolsize)
-        args = zip(match_matrices,repeat(kdnc),repeat(iota),repeat((coords)),repeat(rate))
+        args = zip(match_matrices,repeat(kdnc),repeat(epsilon),repeat((coords)),repeat(rate))
 
         ## this also needs to become a diskcache if pairs > 4 (?)
         # mm = dict()
@@ -703,15 +714,15 @@ if __name__ == '__main__':
         for f,dd in sorted(dd.items(),key=operator.itemgetter(0)):
             m        = mmatrix(f)
             mstring  = printline(m)
-            c,kd     = compute_coding_matrix(m,kdnc,iota,square=False)
+            c,kd     = compute_coding_matrix(m,kdnc,epsilon,square=False)
             acc      = get_accuracy(c)
-            c2,kd    = compute_coding_matrix(m,kdnc,iota,square=True)
+            c2,kd2   = compute_coding_matrix(m,kdnc,epsilon,square=True)
             acc2     = get_accuracy(c2)
             cstring  = printline(np.round(c,3))
             c2string  = printline(np.round(c2,3))
             if show_dissociation:
-                kdstring = printline(kd)
-                print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring,kdstring))
+                kdstring = printline(kd2)
+                print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb[f]/sfb),(fitb2[f]/sfb2),mstring,c2string,cstring,kdstring))
                 #print ('degen: {:>10} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring,kdstring))
             else:
                 #print ('degen: {:>10} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring))
