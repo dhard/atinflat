@@ -69,7 +69,7 @@ def sbm_matrix(k,m=None):
     else:
         return None
 
-mmd     = dict() # match matrix dictionary keyed by fitness 
+mmd     = dict() # match matrix dictionary keyed by joblib hash 
 @memory.cache
 def mmatrix(k,m=None):
     if k in mmd:
@@ -82,6 +82,7 @@ def mmatrix(k,m=None):
 
 degeneracy = dict()
 off        = dict()
+ips        = dict()
 # this could be rewritten to take advantage of pool.imap().
 def compute_degeneracy(tRNAs,aaRSs,mask,cache):
     """
@@ -100,7 +101,10 @@ def compute_degeneracy(tRNAs,aaRSs,mask,cache):
         for setm,setn,sett,seta in genotypes:
             offm      = uni_t - setm
             offn      = uni_a - setn
-            eoff      = len(offm) + len(offn)
+            eoff      = len(offm) + len(offn) # eoff is ultimately the expected fraction of sites masked per genotype 
+            eips      = (2 * len(setm) * len(setn))  # eips is expected number of unmasked interactions per site 0 <= eips <= P or N+M/2 
+            if ( eips > 0 ):
+                eips /= ( len(setm) + len(setn))  
             settc     = uni_t - sett
             sett     &= setm
             settc    &= setm
@@ -121,9 +125,11 @@ def compute_degeneracy(tRNAs,aaRSs,mask,cache):
             if key in degeneracy:
                 degeneracy[key] += 1
                 off[key]        += eoff / (2 * pairs * width)
+                ips[key]        += eips / width
             else:
                 degeneracy[key] = 1
                 off[key]        = eoff / (2 * pairs * width)
+                ips[key]        = eips / width
                 if cache:
                      sbm_matrix(key,m) # THIS IS NOT TESTED
                 else:
@@ -132,6 +138,7 @@ def compute_degeneracy(tRNAs,aaRSs,mask,cache):
  
         for key in off:
             off[key] /= degeneracy[key]
+            ips[key] /= degeneracy[key]
         #pdb.set_trace()
     else:
         genotypes = genotypes_gen(tRNAs,aaRSs)
@@ -202,7 +209,37 @@ def compute_match_matrix(g,width,pairs,mask):
             
     ## compute matching function
     m = np.zeros((pairs,pairs),dtype=np.int16)
-    o = 0
+    o    = 0 # eoff
+    eips = 0 # eips
+    for i in range(pairs):
+        if mask:
+            o           +=  mt[i].count(0) + ma[i].count(0)
+        for j in range(pairs): 
+            taxnor       = ~(t[i] ^ a[j])
+            if mask:
+                maskand  =  mt[i] & ma[j]
+                m[i,j]   = (maskand & taxnor).count(1)
+            else:
+                m[i,j]   = (taxnor).count(1)
+    ## compute off mask
+    o /=  2 * width * (pairs)
+
+    ei  = 0
+    eid = 0
+    ## compute interactions per site 
+    if mask:
+        for k in range (width):
+            for j in range(pairs):
+                eid  +=  ma[j][k]
+            for i in range(pairs):
+                eid  +=  mt[i][k]
+                if mt[i][k]:
+                    for j in range(pairs): 
+                        if (ma[j][k]):
+                            ei  += 2
+    ei /= eid        
+             
+
     for i in range(pairs):
         if mask:
             o       +=  mt[i].count(0) + ma[i].count(0)
@@ -214,9 +251,8 @@ def compute_match_matrix(g,width,pairs,mask):
             else:
                 m[i,j]   = (taxnor).count(1)
 
-    ## compute off mask
-    o /=  2 * width * (pairs)
-    return m,o
+
+    return m,o,ei
 
 def compute_coding_matrix(m,kdnc,epsilon,square):
     ## compute energies and kinetic off-rates between tRNAs and aaRSs from the match matrix
@@ -259,7 +295,7 @@ def compute_fitness_given_coding_matrix(c,kd,coords,rate,square):
 # this is the main target function for the multiprocessing pool during computation of the landscape
 def compute_fitness(args):
     #input m is the width-th cartesian power of site-block-match-matrices
-    (m,d,o),kdnc,epsilon,coords,rate = args
+    (m,d,o,ei),kdnc,epsilon,coords,rate = args
     
     ## compute energies and kinetic off-rates between tRNAs and aaRSs from the match matrix
     #kd = 1/((1 / kdnc) * np.exp(m * epsilon)) # # K_ij = (kdnc)^-1 * exp [m_ij * epsilon], and k_d = (1/K_ij)
@@ -276,8 +312,8 @@ def compute_fitness(args):
 
             
     ## compute fitness bounds (f is in dead cells at equilibrium and f2 is with maximum kinetic proofreading)              
-    f     = 1
-    f2    = 1
+    fa     = 1
+    fa2    = 1
 
     for i in range(tRNAs):
         fc = fc2 = 0
@@ -285,10 +321,11 @@ def compute_fitness(args):
             fij  = phi**(abs(coords[i] - coords[j]))
             fc  += c [i,j] * fij
             fc2 += c2[i,j] * fij
-        f  *= fc
-        f2 *= fc2
+        fa  *= fc
+        fa2 *= fc2
 
-    
+    f = fa
+    f2 = fa2
     if rate:
         #avg_kd   = stats.hmean(np.diagonal(kd))
         #avg_kd2  = stats.hmean(np.diagonal(kd2))
@@ -299,7 +336,7 @@ def compute_fitness(args):
         f2      *= 1.0 - exp(-1.505760 * avg_kd2 / 9680) # curve fit to data of Paulander et al (2007)
         f       *= 1.0 - exp(-1.505760 * avg_kd / 44)    # curve fit to data of Paulander et al (2007)
     
-    return m,d,o,f,f2
+    return m,d,o,ei,f,f2,fa,fa2
 
 
 # version 1.1:
@@ -543,21 +580,21 @@ if __name__ == '__main__':
             for line in f:
                 strip1 = re.sub('#.*','',line)
                 strip2 = re.sub('\s+','',strip1)
-                match = re.search('^[01]+', strip2)
+                match  = re.search('^[01]+', strip2)
                 if match:
-                    b  = match.group(0)
-                    g = Bits(bin=b)
-                    m,o = compute_match_matrix(g,width,pairs,mask)
-                    c,kd = compute_coding_matrix(m,kdnc,epsilon,square=True)
+                    b        = match.group(0)
+                    g        = Bits(bin=b)
+                    m,o,ei   = compute_match_matrix(g,width,pairs,mask)
+                    c,kd     = compute_coding_matrix(m,kdnc,epsilon,square=True)
                     mstring  = printline(m)
                     cstring  = printline(np.round(c,2))
-                    f  = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
+                    f        = compute_fitness_given_coding_matrix(c,kd,coords,rate,square=True)
                     if show_dissociation:
                         kdstring = printline(kd)
-                        print ('genotype: {} | off: {:<5.3e} | fitness: {: <11.9e} | match: {} | dissociation: {} | proofread code: {}'.format(b,o,f,mstring,kdstring,cstring))
+                        print ('genotype: {} | off: {:<5.3e} | ips: {:<5.3e} | fitness: {: <11.9e} | match: {} | dissociation: {} | proofread code: {}'.format(b,o,ei,f,mstring,kdstring,cstring))
                         #print ('genotype: {} | fitness: {: <11.9e} | match: {} | dissociation: {} | proofread code: {}'.format(b,f,mstring,kdstring,cstring))
                     else:
-                        print ('genotype: {} | off: {:<5.3e} | fitness: {: <11.9e} | match: {} | proofread code: {}'.format(b,o,f,mstring,cstring))                        
+                        print ('genotype: {} | off: {:<5.3e} | ips: {:<5.3e} | fitness: {: <11.9e} | match: {} | proofread code: {}'.format(b,o,ei,f,mstring,cstring))                        
                     ## if mutate: ## DHA032918. THIS WAS DRAFTED BUT NEVER USED OR TESTED 
                     ##     gf = f
                     ##     d = dict()
@@ -639,6 +676,9 @@ if __name__ == '__main__':
         def get_offmask(key_tuple):
             return reduce(lambda x,y:x+off[y], key_tuple, 0)            
 
+        def get_eips(key_tuple):
+            return reduce(lambda x,y:x+ips[y], key_tuple, 0)
+        
         def match_matrices_gen(tRNAs,aaRSs,cache):
             keyss = key_tuples()
             if cache:
@@ -651,59 +691,57 @@ if __name__ == '__main__':
                 d  = get_degeneracy(key_tuple)
                 if mask:
                     o  = get_offmask(key_tuple)
+                    ei = get_eips(key_tuple)
                 else:
                     o  = 0
-                #pdb.set_trace()
+                    ei = 0
                 c  = Counter(key_tuple)
                 nu = len(c)
                 k  = tuple(c.values())
                 mc = multinomial_coefficients(nu,width)
                 d *= mc[k]
-                yield m,d,o
+                yield m,d,o,ei
 
         match_matrices = match_matrices_gen(tRNAs,aaRSs,cache)
 
         pool = multiprocessing.Pool(processes=poolsize)
         args = zip(match_matrices,repeat(kdnc),repeat(epsilon),repeat((coords)),repeat(rate))
 
-        ## this also needs to become a diskcache if pairs > 4 (?)
-        # mm = dict()
-
-        dd = dict()
-        oo = dict()
-        fit = dict()
+        dd   = dict()
+        oo   = dict()
+        eeii = dict()
+        fit  = dict()
         fit2 = dict()
-
+        fita = dict()
+        fita2= dict()
+        
         #for arg in args:
         #    m,d,o,f,f2    = compute_fitness(arg)
 
-        ## if (meso):
-        ##     for arg in args:
-        ##         print_stochkit2(arg)  
-        #    else:
+        for m,d,o,ei,f,f2,fa,fa2 in pool.imap(compute_fitness,args,chunksize=chunksize):
 
-
-        for m,d,o,f,f2 in pool.imap(compute_fitness,args,chunksize=chunksize):
-
-            fk  = round(f,10) ## THIS IS A GIANT HACK
-
-            if fk in dd:
-                dd[fk]        += d
-                oo[fk]        += (d * o)
-                fb            =  fitb[fk]
-                fb2           =  fitb2[fk]
+            key = joblib.hash(m)
+            if key in dd:
+                dd[key]       +=   d
+                oo[key]       +=  (d * o)
+                fb            =    fitb[key]
+                fb2           =    fitb2[key]
             else:
-                dd  [fk]      =  d
-                oo  [fk]      =  (d * o)
-                fit2[fk]      =  f2
-                fb            =  f**beta
-                fitb[fk]      =  fb
-                fb2           =  f2**beta
-                fitb2[fk]     =  fb2
-                if cache:
-                    mmatrix(fk,m)  # mm[fk]   =  m
-                else:
-                    mmd[fk] = m
+                dd  [key]      =  d
+                oo  [key]      =  (d * o)
+                eeii[key]      =  ei
+                fit [key]      =  f
+                fit2[key]      =  f2
+                fita[key]      =  fa
+                fita2[key]     =  fa2
+                fb             =  f**beta
+                fitb[key]      =  fb
+                fb2            =  f2**beta
+                fitb2[key]     =  fb2
+                #if cache:
+                mmatrix(key,m)  # mm[fk]   =  m
+                #else:
+                #    mmd[key] = m
 
             sfb               +=  (fb * d)
             sffb              += ((fb * f) * d)
@@ -715,8 +753,8 @@ if __name__ == '__main__':
             if f2 > maxf2:
                 maxf2 = f2
 
-        for fk in dd:
-            oo[fk] /= dd[fk]
+        for key in dd:
+            oo[key] /= dd[key]
 
         avgf         = sffb / sfb
         load         = (maxf - avgf)/maxf
@@ -727,27 +765,30 @@ if __name__ == '__main__':
         print ('{} > load > {}'.format(load,load2))
         print ('')
 
-        for f,dd in sorted(dd.items(),key=operator.itemgetter(0)):
-            m        = mmatrix(f)
-            mstring  = printline(m)
-            c,kd     = compute_coding_matrix(m,kdnc,epsilon,square=False)
-            acc      = get_accuracy(c)
-            c2,kd2   = compute_coding_matrix(m,kdnc,epsilon,square=True)
-            acc2     = get_accuracy(c2)
-            cstring  = printline(np.round(c,3))
+        for key,dd in sorted(dd.items(),key=operator.itemgetter(0)):
+            m         = mmatrix(key)
+            f         = fit[key]
+            fa        = fita[key]
+            fa2       = fita2[key]
+            mstring   = printline(m)
+            c,kd      = compute_coding_matrix(m,kdnc,epsilon,square=False)
+            acc       = get_accuracy(c)
+            c2,kd2    = compute_coding_matrix(m,kdnc,epsilon,square=True)
+            acc2      = get_accuracy(c2)
+            cstring   = printline(np.round(c,3))
             c2string  = printline(np.round(c2,3))
-            
+
             if show_dissociation:
                 kdstring = printline(kd2)
                 if logscale:
-                    print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb[f]/sfb),(fitb2[f]/sfb2),mstring,cstring,c2string,kdstring))
+                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e} | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(dd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string,kdstring))
                 else:
-                    print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb[f]/sfb),(fitb2[f]/sfb2),mstring,cstring,c2string,kdstring))
+                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(dd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string,kdstring))
             else:
                 if logscale:
-                    print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb[f]/sfb),(fitb2[f]/sfb2),mstring,cstring,c2string))
+                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(dd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string))
                 else:
-                    print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb[f]/sfb),(fitb2[f]/sfb2),mstring,cstring,c2string))
+                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(dd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string))
 
     print("# Run time (minutes): ",round((time.time()-starttime)/60,3))
                     
