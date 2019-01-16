@@ -765,9 +765,9 @@ if __name__ == '__main__':
         print ('{} > load > {}'.format(load,load2))
         print ('')
 
-        for key,dd in sorted(dd.items(),key=operator.itemgetter(0)):
+        for key,f in sorted(fit.items(),key=operator.itemgetter(1)):
             m         = mmatrix(key)
-            f         = fit[key]
+            ddd       = dd[key]
             fa        = fita[key]
             fa2       = fita2[key]
             mstring   = printline(m)
@@ -781,14 +781,14 @@ if __name__ == '__main__':
             if show_dissociation:
                 kdstring = printline(kd2)
                 if logscale:
-                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e} | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(dd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string,kdstring))
+                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e} | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(ddd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string,kdstring))
                 else:
-                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(dd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string,kdstring))
+                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(ddd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string,kdstring))
             else:
                 if logscale:
-                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(dd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string))
+                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(ddd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string))
                 else:
-                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(dd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string))
+                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(ddd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string))
 
     print("# Run time (minutes): ",round((time.time()-starttime)/60,3))
                     
