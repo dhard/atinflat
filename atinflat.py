@@ -349,11 +349,15 @@ def compute_fitness(args):
 #              - changed name of "iota" to "epsilon"
 #              - corrected curve-fit coefficient from -1.505764 to -1.505760
 # version 1.3:
-#              - added "--logscale" option 
+#              - added "--logscale" option to compute frequencies for multiple values of beta
+#
+# version 1.4:
+#              - added ips-statistic, main data-structure now keyed by match-matrix keys
+#                output is now factored by match-matrices and not by rounded fitness any more
 #
 if __name__ == '__main__':
     starttime = time.time()
-    version = 1.3
+    version = 1.4
     prog = 'atinflat'
     usage = '''usage: %prog [options]
 
