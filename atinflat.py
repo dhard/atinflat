@@ -350,14 +350,18 @@ def compute_fitness(args):
 #              - corrected curve-fit coefficient from -1.505764 to -1.505760
 # version 1.3:
 #              - added "--logscale" option to compute frequencies for multiple values of beta
+#              - added "accfit" to output, so now with --rate, the rate-independent fitness is also calculated
 #
 # version 1.4:
 #              - added ips-statistic, main data-structure now keyed by match-matrix keys
 #                output is now factored by match-matrices and not by rounded fitness any more
+#               
+# version 1.5:
+#              - changed --rate option to --accuracy option. By default now, both fitnesses are computed
 #
 if __name__ == '__main__':
     starttime = time.time()
-    version = 1.4
+    version = 1.5
     prog = 'atinflat'
     usage = '''usage: %prog [options]
 
@@ -422,9 +426,9 @@ if __name__ == '__main__':
                       dest="matches", type="int", default=None,
                       help="set number of matches required to reach the dissociation rate of cognate pairs, kdc.  Default: <width>")
 
-    parser.add_option("-r","--rate",
-                      dest="rate", action="store_true",
-                      help="make fitness depend not only on accuracy but also rate of dissociation.  Default: False")
+    parser.add_option("-a","--accuracy",
+                      dest="accuracy", action="store_true",
+                      help="make fitness depend only on accuracy but also rate of dissociation.  Default: False")
 
     parser.add_option("-P","--pairs",
                       dest="pairs", type="int", default=2,
@@ -460,7 +464,7 @@ if __name__ == '__main__':
 
     parser.add_option("-g","--genotypes",
                       dest="genotypes", type="string", default=None,
-                      help="compute match and code matrices and fitness for binary string genotypes in file and exits. Assumes proofreading. If mask is True, genotype format is t11..t1w.a11..a1w...tP1..tPw.aP1..aPw.m11..m1w.n11..n1w...nP1..nPw, where mij is the maskbit for tij, nij is the maskbit for aij, w is <width> and P is <pairs>. You must set other parameters manually to match your genotype format. Default: %default")
+                      help="compute match and code matrices and fitness for binary string genotypes in file and exits. Assumes proofreading. If mask is True, genotype format is t11..t1w.a11..a1w...tP1..tPw.aP1..aPw.m11..m1w.n11..n1w...nP1..nPw, where mij is the maskbit for tij, nij is the maskbit for aij, w is <width> and P is <pairs>. You must set other parameters manually to match your genotypes. Default: %default")
 
     parser.add_option("--mutate",
                       dest="mutate", action="store_true",
@@ -498,7 +502,7 @@ if __name__ == '__main__':
     phi         = options.phi
     width       = options.width
     matches     = options.matches
-    rate        = options.rate
+    accuracy    = options.accuracy
     pairs       = options.pairs
     mask        = options.mask
     kdnc        = options.kdnc
@@ -512,6 +516,8 @@ if __name__ == '__main__':
     mutate      = options.mutate
     show_dissociation = options.show_dissociation
 
+    rate = not accuracy;
+    
     if not matches:
         matches = width
     epsilon     = (log (kdnc) - log (kdc)) / matches
