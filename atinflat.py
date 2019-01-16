@@ -302,17 +302,21 @@ def compute_fitness(args):
     return m,d,o,f,f2
 
 
-# version 1.1: - fixes an ouput error in which the frequencies of the
+# version 1.1:
+#              - fixes an ouput error in which the frequencies of the
 #                non-proofread and proofread genotype class were switched.
 
-# version 1.2: - revised the definition of rate-dependent fitness factor to include both
+# version 1.2:
+#              - revised the definition of rate-dependent fitness factor to include both
 #                cognate and non-cognate aminoacylations.
 #              - changed name of "iota" to "epsilon"
 #              - corrected curve-fit coefficient from -1.505764 to -1.505760
+# version 1.3:
+#              - added "--logscale" option 
 #
 if __name__ == '__main__':
     starttime = time.time()
-    version = 1.2
+    version = 1.3
     prog = 'atinflat'
     usage = '''usage: %prog [options]
 
@@ -391,8 +395,12 @@ if __name__ == '__main__':
 
     parser.add_option("-B","--beta",
                       dest="beta", type="int", default=100,
-                      help="set beta, a function of the constant population size. See Sella (2009). Default: %default")
+                      help="set beta, one minus the haploid Moran population size.  Default: %default")
 
+    parser.add_option("--logscale",
+                      dest="logscale", type="string", default=None,
+                      help="with string argument \"<start>:<stop>:<num>\" (three colon-separated positive integers): evaluate <num> values of beta from <beta>**<start> to <beta>**<stop> on a log scale.  Default: %default")
+    
     parser.add_option("--phi",
                       dest="phi", type="float", default=0.99,
                       help="set phi, the maximum missense fitness-per-site penalty, 0 < phi < 1. See Sella and Ardell (2001). Default: %default")
@@ -445,6 +453,7 @@ if __name__ == '__main__':
     fitb2       = {}
 
     beta        = options.beta
+    logscale    = options.logscale
     phi         = options.phi
     width       = options.width
     matches     = options.matches
@@ -471,6 +480,13 @@ if __name__ == '__main__':
     length      = width * (tRNAs + aaRSs)
     if mask:
         length *= 2
+
+    if logscale:
+        words     = logscale.split(':')
+        startpow  = int(words[0])
+        endpow    = int(words[1])
+        numbeta   = int(words[2])
+        beta      = np.floor(np.logspace(startpow, endpow, num=numbeta, base=beta))
 
         
     sfb         = 0
@@ -688,7 +704,7 @@ if __name__ == '__main__':
                     mmatrix(fk,m)  # mm[fk]   =  m
                 else:
                     mmd[fk] = m
-            
+
             sfb               +=  (fb * d)
             sffb              += ((fb * f) * d)
             if f > maxf:
@@ -720,13 +736,18 @@ if __name__ == '__main__':
             acc2     = get_accuracy(c2)
             cstring  = printline(np.round(c,3))
             c2string  = printline(np.round(c2,3))
+            
             if show_dissociation:
                 kdstring = printline(kd2)
-                print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb[f]/sfb),(fitb2[f]/sfb2),mstring,c2string,cstring,kdstring))
-                #print ('degen: {:>10} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring,kdstring))
+                if logscale:
+                    print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb[f]/sfb),(fitb2[f]/sfb2),mstring,cstring,c2string,kdstring))
+                else:
+                    print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb[f]/sfb),(fitb2[f]/sfb2),mstring,cstring,c2string,kdstring))
             else:
-                #print ('degen: {:>10} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring))
-                print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(max.proofread:dead):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb2[f]/sfb2),(fitb[f]/sfb),mstring,c2string,cstring))
+                if logscale:
+                    print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb[f]/sfb),(fitb2[f]/sfb2),mstring,cstring,c2string))
+                else:
+                    print ('degen: {:>10} | off: {:<5.3e} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(dd,oo[f],acc,acc2,f,fit2[f],(fitb[f]/sfb),(fitb2[f]/sfb2),mstring,cstring,c2string))
 
     print("# Run time (minutes): ",round((time.time()-starttime)/60,3))
                     
