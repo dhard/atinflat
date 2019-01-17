@@ -21,7 +21,7 @@ import joblib
 
 
 def printline(m):
-    return re.sub('  ',' ',re.sub('\n',',',np.array2string(m)))
+    return  re.sub('\[ ','[',re.sub(' \[','[',re.sub('  ',' ',re.sub('\n',',',np.array2string(m)))))
 
 def powerset(iterable):
     """
@@ -358,10 +358,15 @@ def compute_fitness(args):
 #               
 # version 1.5:
 #              - changed --rate option to --accuracy option. By default now, both fitnesses are computed
-#
+#              - the output for --accuracy was not developed or test (in which accuracy-only fitness is the only one computed)
+#            
+# version 1.6:
+#              - added summary stats and stationary frequency information for accuracy fitness on default output
+# 
+
 if __name__ == '__main__':
     starttime = time.time()
-    version = 1.5
+    version = 1.6
     prog = 'atinflat'
     usage = '''usage: %prog [options]
 
@@ -491,11 +496,6 @@ if __name__ == '__main__':
     (options, args) = parser.parse_args()
     if len(args) != 0:
         parser.error("expects zero arguments")
-        
-    maxf        = 0
-    maxf2       = 0
-    fitb        = {}
-    fitb2       = {}
 
     beta        = options.beta
     logscale    = options.logscale
@@ -535,12 +535,6 @@ if __name__ == '__main__':
         numbeta   = int(words[2])
         beta      = np.floor(np.logspace(startpow, endpow, num=numbeta, base=beta))
 
-        
-    sfb         = 0
-    sffb        = 0
-    sfb2        = 0
-    sffb2       = 0
-
     # calculate site-type space
     cuts  = pairs - 1
     segment = 1.0 / cuts
@@ -557,28 +551,28 @@ if __name__ == '__main__':
     print('# execution command:')
     print('# '+' '.join(myargv))
     print('#')
-    print('# pairs      :  {}'.format(pairs))
-    #  print('# tRNAs     :  {}'.format(pairs))
-    #  print('# aaRSs     :  {}'.format(pairs))
-    print('# width (n)  :  {}'.format(width))
-    print('# matches(k) :  {}'.format(matches))
-    print('# mask       :  {}'.format(mask))
-    print('# rate       :  {}'.format(rate))    
-    print('# kdnc       :  {}'.format(kdnc))
-    print('# kdc        :  {}'.format(kdc))
-    print('# epsilon    :  {}'.format(epsilon))
-    print('# phi        :  {}'.format(phi))
-    print('# beta       :  {}'.format(beta))
-    print('# length     :  {}'.format(length))
-    print('# coords     :  {}'.format(coords))
+    print('# pairs         :  {}'.format(pairs))
+    #  print('# tRNAs      :  {}'.format(pairs))
+    #  print('# aaRSs      :  {}'.format(pairs))
+    print('# width (n)     :  {}'.format(width))
+    print('# matches(k)    :  {}'.format(matches))
+    print('# mask          :  {}'.format(mask))
+    print('# accuracy-only :  {}'.format(accuracy))    
+    print('# kdnc          :  {}'.format(kdnc))
+    print('# kdc           :  {}'.format(kdc))
+    print('# epsilon       :  {}'.format(epsilon))
+    print('# phi           :  {}'.format(phi))
+    print('# beta          :  {}'.format(beta))
+    print('# length        :  {}'.format(length))
+    print('# coords        :  {}'.format(coords))
     print('#')
-    print('# verbose    :  {}'.format(verbose))
-    print('# genotypes  :  {}'.format(genotypes))
-    print('# mutate     :  {}'.format(mutate))
+    print('# verbose       :  {}'.format(verbose))
+    print('# genotypes     :  {}'.format(genotypes))
+    print('# mutate        :  {}'.format(mutate))
     print('# show-dissociation:  {}'.format(show_dissociation))
-    print('# pool-size  :  {}'.format(poolsize))
-    print('# chunk-size :  {}'.format(chunksize))
-    print('# cache      :  {}'.format(cache))
+    print('# pool-size     :  {}'.format(poolsize))
+    print('# chunk-size    :  {}'.format(chunksize))
+    print('# cache         :  {}'.format(cache))
     print('#')
     if genotypes:
         print('#')
@@ -720,10 +714,31 @@ if __name__ == '__main__':
         dd   = dict()
         oo   = dict()
         eeii = dict()
+
         fit  = dict()
         fit2 = dict()
         fita = dict()
         fita2= dict()
+
+        fitb        = {}
+        fitb2       = {}
+        fitab       = {}
+        fitab2      = {}
+        
+        maxf        = 0
+        maxf2       = 0
+        maxfa       = 0
+        maxfa2      = 0
+        
+        sfb         = 0
+        sfb2        = 0
+        sfab        = 0
+        sfab2       = 0
+        
+        sfbf        = 0
+        sfbf2       = 0
+        sfabfa      = 0
+        sfabfa2     = 0        
         
         #for arg in args:
         #    m,d,o,f,f2    = compute_fitness(arg)
@@ -732,52 +747,86 @@ if __name__ == '__main__':
 
             key = joblib.hash(m)
             if key in dd:
-                dd[key]       +=   d
-                oo[key]       +=  (d * o)
-                fb            =    fitb[key]
-                fb2           =    fitb2[key]
+                dd[key]        +=   d
+                oo[key]        +=  (d * o)
+                fb             =    fitb[key]
+                fb2            =    fitb2[key]
+                fab            =    fitab[key]
+                fab2           =    fitab2[key]
             else:
                 dd  [key]      =  d
                 oo  [key]      =  (d * o)
                 eeii[key]      =  ei
+
                 fit [key]      =  f
                 fit2[key]      =  f2
                 fita[key]      =  fa
                 fita2[key]     =  fa2
+
                 fb             =  f**beta
+                fb2            =  f2**beta                
+                fab            =  fa**beta
+                fab2           =  fa2**beta
+                
                 fitb[key]      =  fb
-                fb2            =  f2**beta
                 fitb2[key]     =  fb2
+                fitab[key]     =  fab
+                fitab2[key]    =  fab2
+
                 #if cache:
                 mmatrix(key,m)  # mm[fk]   =  m
                 #else:
                 #    mmd[key] = m
 
+            ## REWRITE THIS TO PRINT BOTH THE ACCURACY AND RATE SUMMARIES
+
             sfb               +=  (fb * d)
-            sffb              += ((fb * f) * d)
+            sfb2              +=  (fb2 * d)
+            sfab              +=  (fab * d)
+            sfab2             +=  (fab2 * d)
+
+            sfbf              += ((fb * f) * d)
+            sfbf2             += ((fb2 * f2) * d)
+            sfabfa            += ((fab * fa) * d)
+            sfabfa2           += ((fab2 * fa2) * d)
+            
             if f > maxf:
                 maxf = f
-
-            sfb2              +=  (fb2 * d)
-            sffb2             += ((fb2 * f2) * d)
             if f2 > maxf2:
                 maxf2 = f2
-
+            if fa > maxfa:
+                maxfa = fa
+            if fa2 > maxfa2:
+                maxfa2 = fa2
+                
         for key in dd:
             oo[key] /= dd[key]
 
-        avgf         = sffb / sfb
-        load         = (maxf - avgf)/maxf
-        avgf2        = sffb2 / sfb2
-        load2        = (maxf2 - avgf2)/maxf2
-        print ('{} < maxf < {}'.format(maxf,maxf2))
-        print ('{} < avgf < {}'.format(avgf,avgf2))
-        print ('{} > load > {}'.format(load,load2))
-        print ('')
+        avgf         = sfbf    /  sfb
+        avgf2        = sfbf2   /  sfb2
+        avgfa        = sfabfa  /  sfab
+        avgfa2       = sfabfa2 /  sfab2
+        
+        load         = ( maxf   - avgf   ) / maxf
+        load2        = ( maxf2  - avgf2  ) / maxf2
+        loada        = ( maxfa  - avgfa  ) / maxfa
+        loada2       = ( maxfa2 - avgfa2 ) / maxfa2            
 
+        print ('{}  <  max. fitness (accuracy and rate) < {} (proofread)'.format(maxf,maxf2))
+        print ('{}  <  max. fitness (accuracy only)     < {} (proofread)'.format(maxfa,maxfa2))        
+
+        print ('{}  <  avg. fitness (accuracy and rate) < {} (proofread)'.format(avgf,avgf2))
+        print ('{}  <  avg. fitness (accuracy only)     < {} (proofread)'.format(avgfa,avgfa2))
+
+        print ('{}  >  load         (accuracy and rate) > {} (proofread)'.format(load,load2))
+        print ('{}  >  load         (accuracy only)     > {} (proofread)'.format(loada,loada2))
+        print ('')
+        print ('match'.format(loada,loada2))
+        
         for key,f in sorted(fit.items(),key=operator.itemgetter(1)):
             m         = mmatrix(key)
             ddd       = dd[key]
+            f2        = fit2[key]
             fa        = fita[key]
             fa2       = fita2[key]
             mstring   = printline(m)
@@ -787,18 +836,16 @@ if __name__ == '__main__':
             acc2      = get_accuracy(c2)
             cstring   = printline(np.round(c,3))
             c2string  = printline(np.round(c2,3))
+            fr        = (fitb[key]/sfb)    # frequencies
+            fr2       = (fitb2[key]/sfb2)
+            fra       = (fitab[key]/sfab)
+            fra2      = (fitab2[key]/sfab2)
 
             if show_dissociation:
                 kdstring = printline(kd2)
-                if logscale:
-                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e} | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(ddd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string,kdstring))
-                else:
-                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<} | dissociation:{}'.format(ddd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string,kdstring))
+                print ('match: {} degen: {} off: {:<5.3e} ips: {:<5.3f} | {:<8.6e} <_acc_< {:<8.6e} | {: <11.9e} <_fit_< {: <11.9e} | {} <_freq_< {} | {: <11.9e} <_accfit_< {: <11.9e} | {} <_accfreq_< {} code:proof_code: {:<}:{:<} dissoc: {}'.format(mstring,ddd,oo[key],eeii[key],acc,acc2,f,f2,fr,fr2,fa,fa2,fra,fra2,cstring,c2string,kdstring))
             else:
-                if logscale:
-                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {} < frequency < {} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(ddd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string))
-                else:
-                    print ('degen: {:>10} | off: {:<5.3e} | ips: {:<5.3f} | {:<8.6e} < accuracy < {:<8.6e} | {: <11.9e} < fitness < {: <11.9e} | {: <11.9e} < accfitness < {: <11.9e}  | {:<11.9e} < frequency < {:>11.9e} | match:{} | code(dead:max.proofread):{:<}:{:<}'.format(ddd,oo[key],eeii[key],acc,acc2,f,fit2[key],fa,fa2,(fitb[key]/sfb),(fitb2[key]/sfb2),mstring,cstring,c2string))
+                print ('match: {} degen: {} off: {:<5.3e} ips: {:<5.3f} | {:<8.6e} <_acc_< {:<8.6e} | {: <11.9e} <_fit_< {: <11.9e} | {} <_freq_< {} | {: <11.9e} <_accfit_< {: <11.9e} | {} <_accfreq_< {} code:proof_code: {:<}:{:<}'.format(mstring,ddd,oo[key],eeii[key],acc,acc2,f,f2,fr,fr2,fa,fa2,fra,fra2,cstring,c2string))
 
     print("# Run time (minutes): ",round((time.time()-starttime)/60,3))
                     
