@@ -1,4 +1,3 @@
-#! /usr/bin/python
 from __future__ import division 
 from __future__ import print_function
 from optparse import OptionParser, OptionValueError
@@ -55,8 +54,9 @@ def genotypes_gen(tRNAs,aaRSs):
 
 from tempfile import mkdtemp
 cachedir = mkdtemp()
+print(cachedir)
 from joblib import Memory
-memory = Memory(cachedir=cachedir, mmap_mode='r', verbose=0)
+memory = Memory(location=cachedir, mmap_mode='r', verbose=0)
 
 sbmmd     = dict() # site-block match matrix dictionary keyed by joblib hashes 
 @memory.cache
